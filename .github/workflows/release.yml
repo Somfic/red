@@ -237,7 +237,7 @@ jobs:
 
       - name: setup pages
         if: steps.version.outputs.should_release == 'true'
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
 
       - name: upload artifact
         if: steps.version.outputs.should_release == 'true'
