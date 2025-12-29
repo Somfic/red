@@ -1,0 +1,23 @@
+# Rust
+/target
+Cargo.lock
+
+# Web
+web/node_modules/
+web/dist/
+web/.vite/
+
+# WASM build output
+web/src/lib/wasm/
+
+# OS
+.DS_Store
+
+# Editor
+.idea/
+*.swp
+.vscode/
+
+# Environment
+.claude/
+.direnv/

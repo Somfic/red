@@ -1,0 +1,21 @@
+[package]
+name = "rendering"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+simulation = { path = "../simulation" }
+bevy = { version = "0.17.3", default-features = false, features = [
+    "bevy_asset",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_winit",
+    "webgl2",
+    "web",
+] }
+wasm-bindgen = "=0.2.105"
+console_error_panic_hook = "0.1"
