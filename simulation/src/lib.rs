@@ -1,5 +1,6 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bevy_time::Time;
 use glam::Vec3;
 
 pub mod prelude;
@@ -47,6 +48,7 @@ pub enum LightState {
 }
 
 fn move_vehicles(
+    time: Res<Time>,
     mut vehicles: Query<(&Vehicle, &mut OnSegment)>,
     segments: Query<&Segment>,
     nodes: Query<&Node>,
@@ -65,8 +67,12 @@ fn move_vehicles(
         };
 
         let segment_length = from_node.position.distance(to_node.position);
-        let progress_delta = vehicle.speed / segment_length;
+        let progress_delta = vehicle.speed * time.delta_secs() / segment_length;
 
         on_segment.progress += progress_delta;
+
+        if on_segment.progress >= 1.0 {
+            on_segment.progress = 0.0;
+        }
     }
 }
