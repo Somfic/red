@@ -1,11 +1,11 @@
 # Build WASM
 wasm:
-    cargo build --release -p rendering
+    cargo build --release -p rendering --target wasm32-unknown-unknown
     wasm-bindgen --out-dir web/src/lib/wasm --target web target/wasm32-unknown-unknown/release/rendering.wasm
 
 # Build WASM (debug, faster compile)
 wasm-dev:
-    cargo build -p rendering
+    cargo build -p rendering --target wasm32-unknown-unknown
     wasm-bindgen --out-dir web/src/lib/wasm --target web target/wasm32-unknown-unknown/debug/rendering.wasm
 
 # Start dev server (rebuild wasm first)

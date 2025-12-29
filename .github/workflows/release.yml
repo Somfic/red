@@ -5,63 +5,8 @@ on:
     branches: [main]
 
 jobs:
-  build:
-    name: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: checkout code
-        uses: actions/checkout@v4
-
-      - name: setup rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: build rust
-        run: cargo build --release -p rendering
-
-  test:
-    name: test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: checkout code
-        uses: actions/checkout@v4
-
-      - name: setup rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: run tests
-        run: cargo test --all
-
   release:
     name: release
-    needs: [build, test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -76,6 +21,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: setup nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: setup nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: run tests
+        run: nix develop --command cargo test -p simulation
 
       - name: calculate version and generate changelog
         id: version
@@ -193,49 +147,9 @@ jobs:
             echo 'EOF'
           } >> $GITHUB_OUTPUT
 
-      - name: setup rust
+      - name: build
         if: steps.version.outputs.should_release == 'true'
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: cache cargo
-        if: steps.version.outputs.should_release == 'true'
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: build rust
-        if: steps.version.outputs.should_release == 'true'
-        run: cargo build --release -p rendering
-
-      - name: setup bun
-        if: steps.version.outputs.should_release == 'true'
-        uses: oven-sh/setup-bun@v2
-
-      - name: install wasm-bindgen
-        if: steps.version.outputs.should_release == 'true'
-        run: cargo install wasm-bindgen-cli --version 0.2.105
-
-      - name: generate wasm bindings
-        if: steps.version.outputs.should_release == 'true'
-        run: |
-          mkdir -p web/src/lib/wasm
-          wasm-bindgen --out-dir web/src/lib/wasm --target web target/wasm32-unknown-unknown/release/rendering.wasm
-
-      - name: install web dependencies
-        if: steps.version.outputs.should_release == 'true'
-        run: cd web && bun install
-
-      - name: build web
-        if: steps.version.outputs.should_release == 'true'
-        run: cd web && bun run build
+        run: nix develop --command just build
 
       - name: setup pages
         if: steps.version.outputs.should_release == 'true'

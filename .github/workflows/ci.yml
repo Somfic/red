@@ -2,76 +2,29 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
-  build:
-    name: build
+  build-and-test:
+    name: build and test
     runs-on: ubuntu-latest
 
     steps:
       - name: checkout code
         uses: actions/checkout@v4
 
-      - name: setup rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+      - name: setup nix
+        uses: DeterminateSystems/nix-installer-action@main
 
-      - name: cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      - name: setup nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: build rust
-        run: cargo build --release -p rendering
-
-      - name: setup bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: install wasm-bindgen
-        run: cargo install wasm-bindgen-cli --version 0.2.105
-
-      - name: generate wasm bindings
-        run: |
-          mkdir -p web/src/lib/wasm
-          wasm-bindgen --out-dir web/src/lib/wasm --target web target/wasm32-unknown-unknown/release/rendering.wasm
-
-      - name: install web dependencies
-        run: cd web && bun install
+      - name: build wasm
+        run: nix develop --command just wasm
 
       - name: build web
-        run: cd web && bun run build
-
-  test:
-    name: test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: checkout code
-        uses: actions/checkout@v4
-
-      - name: setup rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+        run: nix develop --command bash -c "cd web && bun run build"
 
       - name: run tests
-        run: cargo test --all
+        run: nix develop --command cargo test -p simulation
