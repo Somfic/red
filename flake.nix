@@ -40,7 +40,7 @@
           ];
 
           shellHook = ''
-            export PATH="$HOME/.cargo/bin:$PATH"
+            export PATH="$PATH:$HOME/.cargo/bin"
 
             # Install committer if not already installed
             if ! command -v committer &> /dev/null; then
