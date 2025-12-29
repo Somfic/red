@@ -1,27 +1,18 @@
 <script lang="ts">
   import { onMount } from "svelte";
-
-  onMount(async () => {
-    const wasm = await import("./lib/wasm/rendering.js");
-    await wasm.default();
-  });
+  import RenderWindow from "./lib/components/RenderWindow.svelte";
 </script>
 
-<canvas id="game-canvas"></canvas>
+<RenderWindow />
 
 <style lang="scss">
   :global(html, body, #app) {
+    display: flex;
+    flex-grow: 1;
+    width: 100vw;
+    height: 100vh;
     margin: 0;
     padding: 0;
     overflow: hidden;
-    width: 100vw;
-    height: 100vh;
-  }
-
-  canvas {
-    width: 100%;
-    height: 100vh;
-    display: block;
-    outline: none;
   }
 </style>
