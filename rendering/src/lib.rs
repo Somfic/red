@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use simulation::prelude::*;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -14,7 +15,9 @@ pub fn start() {
             }),
             ..default()
         }))
-        .add_systems(Startup, setup)
+        .add_plugins(SimulationPlugin)
+        .add_systems(Startup, (setup, test_intersection))
+        .add_systems(Update, draw_segments)
         .run();
 }
 
@@ -23,18 +26,63 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Cube
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::default())),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
-    ));
-
     // Light
     commands.spawn((PointLight::default(), Transform::from_xyz(4.0, 8.0, 4.0)));
 
     // Camera
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Projection::from(OrthographicProjection {
+            scale: 0.05,
+            ..OrthographicProjection::default_3d()
+        }),
+        Transform::from_xyz(10.0, 10.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+pub fn test_intersection(mut commands: Commands) {
+    let center = commands
+        .spawn(Node {
+            position: Vec3::ZERO,
+        })
+        .id();
+
+    let left = commands
+        .spawn(Node {
+            position: Vec3::new(-10.0, 0.0, 0.0),
+        })
+        .id();
+
+    let right = commands
+        .spawn(Node {
+            position: Vec3::new(10.0, 0.0, 0.0),
+        })
+        .id();
+
+    commands.spawn(Segment {
+        from: left,
+        to: center,
+    });
+
+    commands.spawn(Segment {
+        from: center,
+        to: right,
+    });
+}
+
+fn draw_segments(mut gizmos: Gizmos, segments: Query<&Segment>, nodes: Query<&Node>) {
+    for node in &nodes {
+        gizmos.sphere(node.position, 0.2, Color::linear_rgb(0.0, 1.0, 0.0));
+    }
+
+    for segment in &segments {
+        let Ok(from) = nodes.get(segment.from) else {
+            continue;
+        };
+        let Ok(to) = nodes.get(segment.to) else {
+            continue;
+        };
+
+        gizmos.line(from.position, to.position, Color::WHITE);
+    }
 }

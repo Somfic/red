@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bevy_ecs = "0.17.3"
+bevy_app = "0.17.3"
+glam = "0.30.9"
