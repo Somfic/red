@@ -23,7 +23,7 @@ dev-watch:
 
 # Production build
 build: wasm
-    cd web && bun run build
+    cd web && bun install && bun run build
 
 # Clean all artifacts
 clean:

@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 jobs:
@@ -20,11 +20,11 @@ jobs:
       - name: setup nix cache
         uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: build wasm
-        run: nix develop --command just wasm
+      - name: setup rust cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: build web
-        run: nix develop --command bash -c "cd web && bun run build"
+      - name: build
+        run: nix develop --command just build
 
       - name: run tests
         run: nix develop --command cargo test -p simulation
