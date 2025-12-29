@@ -1,9 +1,12 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use bevy_time::Time;
-use glam::Vec3;
 
+mod arena;
 pub mod prelude;
+mod road;
+pub use arena::*;
+use bevy_time::Time;
+pub use road::*;
 
 pub struct SimulationPlugin;
 
@@ -14,65 +17,39 @@ impl Plugin for SimulationPlugin {
 }
 
 #[derive(Component)]
-pub struct Node {
-    pub position: Vec3,
-}
-
-#[derive(Component)]
-pub struct Segment {
-    pub from: Entity,
-    pub to: Entity,
-}
-
-#[derive(Component)]
 pub struct Vehicle {
     pub speed: f32,
 }
 
 #[derive(Component)]
 pub struct OnSegment {
-    pub segment: Entity,
-    pub progress: f32, // 0.0 = at start, 1.0 = at end
-}
-
-#[derive(Component)]
-pub struct TrafficLight {
-    pub state: LightState,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LightState {
-    Red,
-    Yellow,
-    Green,
+    pub segment: Id<Segment>,
+    pub progress: f32,
 }
 
 fn move_vehicles(
     time: Res<Time>,
     mut vehicles: Query<(&Vehicle, &mut OnSegment)>,
-    segments: Query<&Segment>,
-    nodes: Query<&Node>,
+    roads: Res<Road>,
 ) {
     for (vehicle, mut on_segment) in &mut vehicles {
-        let Ok(segment) = segments.get(on_segment.segment) else {
-            continue;
-        };
+        let segment = roads.segments.get(&on_segment.segment);
+        let from = roads.nodes.get(&segment.from);
+        let to = roads.nodes.get(&segment.to);
 
-        let Ok(from_node) = nodes.get(segment.from) else {
-            continue;
-        };
-
-        let Ok(to_node) = nodes.get(segment.to) else {
-            continue;
-        };
-
-        let segment_length = from_node.position.distance(to_node.position);
+        let segment_length = from.position.distance(to.position);
         let progress_delta = vehicle.speed * time.delta_secs() / segment_length;
 
         on_segment.progress += progress_delta;
 
+        // move to the next segment
         if on_segment.progress >= 1.0 {
-            on_segment.progress = 0.0;
+            if to.outgoing.is_empty() {
+                on_segment.progress = 1.0;
+            } else {
+                on_segment.segment = *to.outgoing.first().unwrap();
+                on_segment.progress -= 1.0;
+            }
         }
     }
 }
