@@ -10,7 +10,7 @@ wasm-dev:
 
 # Start dev server (rebuild wasm first)
 dev: wasm-dev
-    cd web && bun run dev
+    cd web && bun install && bun run dev
 
 # Watch Rust changes and rebuild WASM
 watch:

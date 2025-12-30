@@ -1,5 +1,8 @@
 use bevy::prelude::*;
-use simulation::prelude::*;
+use simulation::{
+    driver::{Idm, Vehicle},
+    prelude::*,
+};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -21,13 +24,9 @@ pub fn start() {
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn setup(mut commands: Commands) {
     // Light
-    commands.spawn((PointLight::default(), Transform::from_xyz(4.0, 8.0, 4.0)));
+    commands.spawn((PointLight::default(), Transform::from_xyz(0.0, 0.0, 4.0)));
 
     // Camera
     commands.spawn((
@@ -36,7 +35,7 @@ fn setup(
             scale: 0.05,
             ..OrthographicProjection::default_3d()
         }),
-        Transform::from_xyz(10.0, 10.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 
@@ -44,43 +43,57 @@ pub fn test_intersection(mut commands: Commands) {
     let mut road = Road::default();
 
     // Create nodes
-    let left = road.nodes.alloc(Node {
-        position: Vec3::new(-10.0, 0.0, 0.0),
+    let north = road.nodes.alloc(Node {
+        position: Vec3::new(0.0, 10.0, 0.0),
         outgoing: vec![],
     });
-    let center = road.nodes.alloc(Node {
-        position: Vec3::ZERO,
-        outgoing: vec![],
-    });
-    let right = road.nodes.alloc(Node {
+    let east = road.nodes.alloc(Node {
         position: Vec3::new(10.0, 0.0, 0.0),
+        outgoing: vec![],
+    });
+    let south = road.nodes.alloc(Node {
+        position: Vec3::new(0.0, -10.0, 0.0),
+        outgoing: vec![],
+    });
+    let west = road.nodes.alloc(Node {
+        position: Vec3::new(-10.0, 0.0, 0.0),
         outgoing: vec![],
     });
 
     // Create segments
-    let seg1 = road.segments.alloc(Segment {
-        from: left,
-        to: center,
+    let seg_north_east = road.segments.alloc(Segment {
+        from: north,
+        to: east,
+        speed_limit: 5.0,
     });
-    let seg2 = road.segments.alloc(Segment {
-        from: center,
-        to: right,
+    let seg_east_south = road.segments.alloc(Segment {
+        from: east,
+        to: south,
+        speed_limit: 5.0,
+    });
+    let seg_south_west = road.segments.alloc(Segment {
+        from: south,
+        to: west,
+        speed_limit: 5.0,
+    });
+    let seg_west_north = road.segments.alloc(Segment {
+        from: west,
+        to: north,
+        speed_limit: 5.0,
     });
 
     // Wire up outgoing connections
-    road.nodes.get_mut(&left).outgoing.push(seg1);
-    road.nodes.get_mut(&center).outgoing.push(seg2);
+    road.nodes.get_mut(&north).outgoing.push(seg_north_east);
+    road.nodes.get_mut(&east).outgoing.push(seg_east_south);
+    road.nodes.get_mut(&south).outgoing.push(seg_south_west);
+    road.nodes.get_mut(&west).outgoing.push(seg_west_north);
 
     commands.insert_resource(road);
 
-    // Spawn a test vehicle
-    commands.spawn((
-        Vehicle { speed: 2.0 },
-        OnSegment {
-            segment: seg1,
-            progress: 0.0,
-        },
-    ));
+    commands.spawn(Vehicle::new(seg_west_north));
+    commands.spawn(Vehicle::new(seg_south_west));
+    commands.spawn(Vehicle::new(seg_east_south));
+    // commands.spawn(Vehicle::new(seg_north_east));
 }
 
 fn draw_segments(mut gizmos: Gizmos, road: Res<Road>) {
@@ -96,14 +109,13 @@ fn draw_segments(mut gizmos: Gizmos, road: Res<Road>) {
     }
 }
 
-fn draw_vehicles(mut gizmos: Gizmos, vehicles: Query<&OnSegment>, road: Res<Road>) {
-    for on_segment in &vehicles {
-        let segment = road.segments.get(&on_segment.segment);
+fn draw_vehicles(mut gizmos: Gizmos, vehicles: Query<&Vehicle>, road: Res<Road>) {
+    for vehicle in &vehicles {
+        let segment = road.segments.get(&vehicle.segment);
         let from = road.nodes.get(&segment.from);
         let to = road.nodes.get(&segment.to);
 
-        let position = from.position.lerp(to.position, on_segment.progress);
-
+        let position = from.position.lerp(to.position, vehicle.progress);
         gizmos.sphere(position, 0.5, Color::linear_rgb(1.0, 0.0, 0.0));
     }
 }

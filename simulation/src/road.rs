@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy_ecs::prelude::*;
 use glam::Vec3;
 
@@ -17,4 +19,5 @@ pub struct Node {
 pub struct Segment {
     pub from: Id<Node>,
     pub to: Id<Node>,
+    pub speed_limit: f32,
 }
