@@ -70,10 +70,24 @@ pub fn apply_idm(
         let segment = road.segments.get(&vehicle.segment);
 
         let next_driver = occupancy.find_next(entity, &vehicle, &road);
+        let distance_to_end = (1.0 - vehicle.progress) * segment.length;
 
-        let (gap, delta_speed) = if let Some((next_occupant, distance)) = next_driver {
-            let delta_speed = vehicle.speed - next_occupant.speed;
-            (distance, delta_speed)
+        let (gap, delta_speed) = if vehicle.gap.waiting_time.is_some() {
+            // Waiting - stop at end of segment
+            // Also consider vehicle ahead (take smaller gap)
+            if let Some((next_occupant, distance)) = next_driver {
+                let min_gap = distance.min(distance_to_end);
+                let delta = if min_gap == distance {
+                    vehicle.speed - next_occupant.speed
+                } else {
+                    vehicle.speed
+                };
+                (min_gap, delta)
+            } else {
+                (distance_to_end, vehicle.speed)
+            }
+        } else if let Some((next_occupant, distance)) = next_driver {
+            (distance, vehicle.speed - next_occupant.speed)
         } else {
             (f32::MAX, 0.0)
         };

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy_ecs::prelude::*;
 use glam::Vec3;
 
@@ -86,7 +88,7 @@ impl Road {
     }
 
     pub fn finalize(&mut self) {
-        const INTERSECTION_RADIUS: f32 = 3.0;
+        const INTERSECTION_RADIUS: f32 = 1.0;
         const LANE_OFFSET: f32 = 0.5;
 
         struct EntryData {
@@ -282,6 +284,7 @@ impl Road {
                 incoming: intersection_incoming,
                 outgoing: intersection_outgoing,
                 edge_nodes: all_edge_nodes,
+                conflicts: HashMap::new(),
             });
 
             // Clear the original intersection node's connections (it's no longer used for routing)
@@ -391,6 +394,34 @@ impl Road {
             self.nodes.get_mut(&new_to).incoming.push(seg_id);
         }
 
+        // compute conflicts
+        for intersection in self.intersections.iter_mut() {
+            for (i, &seg_a_id) in intersection.incoming.iter().enumerate() {
+                let seg_a = self.segments.get(&seg_a_id);
+                let from_a = self.nodes.get(&seg_a.from).position;
+                let to_a = self.nodes.get(&seg_a.to).position;
+
+                for &seg_b_id in intersection.incoming.iter().skip(i + 1) {
+                    let seg_b = self.segments.get(&seg_b_id);
+                    let from_b = self.nodes.get(&seg_b.from).position;
+                    let to_b = self.nodes.get(&seg_b.to).position;
+
+                    if do_segments_conflict(seg_a, seg_b, from_a, to_a, from_b, to_b) {
+                        intersection
+                            .conflicts
+                            .entry(seg_a_id)
+                            .or_default()
+                            .push(seg_b_id);
+                        intersection
+                            .conflicts
+                            .entry(seg_b_id)
+                            .or_default()
+                            .push(seg_a_id);
+                    }
+                }
+            }
+        }
+
         // Debug: print graph structure
         crate::log!("=== FINALIZE COMPLETE ===");
         crate::log!("Nodes:");
@@ -408,6 +439,10 @@ impl Road {
         crate::log!("Segments:");
         for (id, seg) in self.segments.iter_with_ids() {
             crate::log!("  {:?}: {:?} -> {:?}", id, seg.from, seg.to);
+        }
+
+        for (id, intersection) in self.intersections.iter_with_ids() {
+            crate::log!("Conflicts: {:?}", intersection.conflicts);
         }
     }
 }
@@ -549,4 +584,40 @@ pub struct Intersection {
     pub incoming: Vec<Id<Segment>>,
     pub outgoing: Vec<Id<Segment>>,
     pub edge_nodes: Vec<Id<Node>>,
+    pub conflicts: HashMap<Id<Segment>, Vec<Id<Segment>>>,
+}
+
+fn do_segments_conflict(
+    a: &Segment,
+    b: &Segment,
+    from_a: Vec3,
+    to_a: Vec3,
+    from_b: Vec3,
+    to_b: Vec3,
+) -> bool {
+    const POINTS: usize = 10;
+
+    let a_points = (0..=POINTS)
+        .map(|i| {
+            let t = i as f32 / POINTS as f32;
+            a.geometry.position_at(from_a, to_a, t)
+        })
+        .collect::<Vec<_>>();
+
+    let b_points = (0..=POINTS)
+        .map(|i| {
+            let t = i as f32 / POINTS as f32;
+            b.geometry.position_at(from_b, to_b, t)
+        })
+        .collect::<Vec<_>>();
+
+    for p_a in &a_points {
+        for p_b in &b_points {
+            if p_a.distance(*p_b) < 0.01 {
+                return true;
+            }
+        }
+    }
+
+    false
 }

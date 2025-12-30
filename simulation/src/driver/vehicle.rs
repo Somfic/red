@@ -1,5 +1,5 @@
 use crate::{
-    driver::{next_segment_toward, Idm, SegmentOccupancy},
+    driver::{next_segment_toward, GapAcceptance, Idm, SegmentOccupancy},
     Id, Node, Road, Segment,
 };
 use bevy_ecs::prelude::*;
@@ -12,17 +12,23 @@ pub struct Vehicle {
     pub segment: Id<Segment>,
     pub progress: f32,
     pub destination: Id<Node>,
+    pub route: Vec<Id<Segment>>,
     pub idm: Idm,
+    pub gap: GapAcceptance,
 }
 
 impl Vehicle {
-    pub fn new(segment: Id<Segment>, destination: Id<Node>) -> Self {
+    pub fn new(segment: Id<Segment>, destination: Id<Node>, route: Vec<Id<Segment>>) -> Self {
+        let aggression = rand::random();
+
         Self {
             speed: 0.0,
             segment,
             progress: 0.0,
             destination,
-            idm: Idm::new(rand::random()),
+            route,
+            idm: Idm::new(aggression),
+            gap: GapAcceptance::new(aggression),
         }
     }
 }
@@ -54,14 +60,16 @@ pub fn move_and_despawn_vehicles(
             } else {
                 let next_segment = next_segment_toward(&roads, segment.to, vehicle.destination);
                 match next_segment {
-                    Some(next) => {
+                    Some((next, route)) => {
                         // Convert excess progress to distance, then to progress on new segment
                         let excess_distance = (vehicle.progress - 1.0) * segment_length;
                         let next_seg = roads.segments.get(&next);
                         let new_progress = excess_distance / next_seg.length;
 
+                        vehicle.route = route;
                         vehicle.segment = next;
                         vehicle.progress = new_progress;
+                        vehicle.gap.waiting_time = None;
                     }
                     None => {
                         crate::log!(
@@ -80,31 +88,29 @@ pub fn move_and_despawn_vehicles(
 pub fn spawn_vehicles(mut commands: Commands, roads: Res<Road>, occupancy: Res<SegmentOccupancy>) {
     let mut total_vehicles: usize = occupancy.vehicles.values().map(|v| v.len()).sum();
 
-    roads
+    for (spawn_id, n) in roads
         .nodes
         .iter_with_ids()
         .filter(|(_, n)| n.is_spawn && !n.outgoing.is_empty())
-        .for_each(|(spawn_id, n)| {
-            if rand::random::<f32>() < 0.1 {
-                if let Some(seg) = n.outgoing.choose(&mut rand::rng()) {
-                    if total_vehicles < 15 {
-                        // Find a reachable destination
-                        let destination = roads
-                            .nodes
-                            .iter_with_ids()
-                            .filter(|(_, node)| node.is_despawn && node.position != n.position)
-                            .filter(|(dest_id, _)| {
-                                // Verify path exists from spawn to destination
-                                next_segment_toward(&roads, spawn_id, *dest_id).is_some()
-                            })
-                            .choose(&mut rand::rng());
+    {
+        if rand::random::<f32>() >= 0.1 || total_vehicles >= 40 {
+            continue;
+        }
 
-                        if let Some((dest_id, _)) = destination {
-                            commands.spawn(Vehicle::new(*seg, dest_id));
-                            total_vehicles += 1;
-                        }
-                    }
-                }
-            }
-        });
+        // Collect valid (destination, first_segment, route) candidates
+        let candidates: Vec<_> = roads
+            .nodes
+            .iter_with_ids()
+            .filter(|(_, node)| node.is_despawn && node.position != n.position)
+            .filter_map(|(dest_id, _)| {
+                next_segment_toward(&roads, spawn_id, dest_id)
+                    .map(|(first_seg, route)| (dest_id, first_seg, route))
+            })
+            .collect();
+
+        if let Some((dest_id, first_seg, route)) = candidates.choose(&mut rand::rng()) {
+            commands.spawn(Vehicle::new(*first_seg, *dest_id, route.clone()));
+            total_vehicles += 1;
+        }
+    }
 }

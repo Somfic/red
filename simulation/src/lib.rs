@@ -24,8 +24,8 @@ pub use road::*;
 pub use spawner::*;
 
 use crate::driver::{
-    apply_idm, move_and_despawn_vehicles, spawn_vehicles, update_occupancy, SegmentOccupancy,
-    Vehicle,
+    apply_gap_acceptance, apply_idm, move_and_despawn_vehicles, spawn_vehicles, update_occupancy,
+    SegmentOccupancy, Vehicle,
 };
 
 pub struct SimulationPlugin;
@@ -39,6 +39,7 @@ impl Plugin for SimulationPlugin {
             (
                 spawn_vehicles,
                 update_occupancy,
+                apply_gap_acceptance,
                 apply_idm,
                 move_and_despawn_vehicles,
             )

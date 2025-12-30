@@ -25,10 +25,7 @@ impl<T> Debug for Id<T> {
 
 impl<T> Clone for Id<T> {
     fn clone(&self) -> Self {
-        Self {
-            _marker: PhantomData,
-            id: self.id.clone(),
-        }
+        *self
     }
 }
 

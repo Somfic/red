@@ -52,10 +52,10 @@ pub fn test_intersection(mut commands: Commands) {
 
     // Create segments (incoming/outgoing wired automatically)
     road.add_bidirectional(north, center, 5.0);
-    road.add_bidirectional(south, center, 5.0);
+    // road.add_bidirectional(south, center, 5.0);
     road.add_bidirectional(east, center, 5.0);
     road.add_bidirectional(west, center, 5.0);
-    road.add_bidirectional(south_east, center, 5.0);
+    // road.add_bidirectional(south_east, center, 5.0);
 
     // Generate intersection edge nodes and turn segments
     road.finalize();

@@ -2,6 +2,7 @@ use crate::{driver::Vehicle, Id, Road, Segment};
 use bevy_ecs::prelude::*;
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub struct Occupant {
     pub progress: f32,
     pub vehicle: Entity,
@@ -15,6 +16,14 @@ pub struct SegmentOccupancy {
 }
 
 impl SegmentOccupancy {
+    pub fn is_occupied(&self, segment: Id<Segment>) -> bool {
+        if let Some(occupants) = self.vehicles.get(&segment) {
+            !occupants.is_empty()
+        } else {
+            false
+        }
+    }
+
     /// Returns the next occupant ahead and the distance to them in world units
     pub fn find_next(
         &self,
@@ -96,6 +105,10 @@ pub fn update_occupancy(
 
     // Sort vehicles on each segment by progress
     for occupants in occupancy.vehicles.values_mut() {
-        occupants.sort_by(|a, b| a.progress.partial_cmp(&b.progress).unwrap());
+        occupants.sort_by(|a, b| {
+            a.progress
+                .partial_cmp(&b.progress)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 }

@@ -9,3 +9,6 @@ pub use occupancy::*;
 
 mod pathfinding;
 pub use pathfinding::*;
+
+mod gap;
+pub use gap::*;

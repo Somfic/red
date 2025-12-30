@@ -5,7 +5,7 @@ pub fn next_segment_toward(
     road: &Road,
     current: Id<Node>,
     destination: Id<Node>,
-) -> Option<Id<Segment>> {
+) -> Option<(Id<Segment>, Vec<Id<Segment>>)> {
     if current == destination {
         return None; // arrived
     }
@@ -21,15 +21,19 @@ pub fn next_segment_toward(
     }
 
     // bfs
+    let mut route = vec![];
     while let Some(node_id) = queue.pop_front() {
         if node_id == destination {
             let mut backtrack = destination;
             loop {
                 let previous_id = came_from.get(&backtrack).unwrap();
+                route.push(*previous_id);
+
                 let previous = road.segments.get(previous_id);
 
                 if previous.from == current {
-                    return Some(*previous_id);
+                    route.reverse();
+                    return Some((*previous_id, route));
                 }
 
                 backtrack = previous.from;
