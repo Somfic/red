@@ -7,6 +7,17 @@ pub mod prelude;
 mod road;
 mod spawner;
 
+/// Log to console (works in both native and WASM)
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {{
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&format!($($arg)*).into());
+        #[cfg(not(target_arch = "wasm32"))]
+        println!($($arg)*);
+    }};
+}
+
 pub use arena::*;
 use bevy_time::Time;
 pub use road::*;

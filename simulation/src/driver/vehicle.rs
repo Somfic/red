@@ -39,26 +39,38 @@ pub fn move_and_despawn_vehicles(
 ) {
     for (entity, mut vehicle) in &mut vehicles {
         let segment = roads.segments.get(&vehicle.segment);
-        let from = roads.nodes.get(&segment.from);
-        let to = roads.nodes.get(&segment.to);
 
-        let segment_length = from.position.distance(to.position);
+        let segment_length = segment.length;
         let progress_delta = vehicle.speed * time.delta_secs() / segment_length;
 
         vehicle.progress += progress_delta;
 
         // move to the next segment
         if vehicle.progress >= 1.0 {
-            if to.outgoing.is_empty() {
+            let to_node = roads.nodes.get(&segment.to);
+            if to_node.outgoing.is_empty() {
+                crate::log!("DESPAWN: to_node has no outgoing segments");
                 commands.entity(entity).despawn();
             } else {
                 let next_segment = next_segment_toward(&roads, segment.to, vehicle.destination);
                 match next_segment {
                     Some(next) => {
+                        // Convert excess progress to distance, then to progress on new segment
+                        let excess_distance = (vehicle.progress - 1.0) * segment_length;
+                        let next_seg = roads.segments.get(&next);
+                        let new_progress = excess_distance / next_seg.length;
+
                         vehicle.segment = next;
-                        vehicle.progress -= 1.0;
+                        vehicle.progress = new_progress;
                     }
-                    None => commands.entity(entity).despawn(),
+                    None => {
+                        crate::log!(
+                            "DESPAWN: pathfinding returned None from {:?} to {:?}",
+                            segment.to,
+                            vehicle.destination
+                        );
+                        commands.entity(entity).despawn();
+                    }
                 }
             }
         }
@@ -70,21 +82,27 @@ pub fn spawn_vehicles(mut commands: Commands, roads: Res<Road>, occupancy: Res<S
 
     roads
         .nodes
-        .iter()
-        .filter(|n| n.is_spawn && !n.outgoing.is_empty())
-        .for_each(|n| {
+        .iter_with_ids()
+        .filter(|(_, n)| n.is_spawn && !n.outgoing.is_empty())
+        .for_each(|(spawn_id, n)| {
             if rand::random::<f32>() < 0.1 {
                 if let Some(seg) = n.outgoing.choose(&mut rand::rng()) {
                     if total_vehicles < 15 {
-                        let (node, _) = roads
+                        // Find a reachable destination
+                        let destination = roads
                             .nodes
                             .iter_with_ids()
                             .filter(|(_, node)| node.is_despawn && node.position != n.position)
-                            .choose(&mut rand::rng())
-                            .unwrap();
+                            .filter(|(dest_id, _)| {
+                                // Verify path exists from spawn to destination
+                                next_segment_toward(&roads, spawn_id, *dest_id).is_some()
+                            })
+                            .choose(&mut rand::rng());
 
-                        commands.spawn(Vehicle::new(*seg, node));
-                        total_vehicles += 1;
+                        if let Some((dest_id, _)) = destination {
+                            commands.spawn(Vehicle::new(*seg, dest_id));
+                            total_vehicles += 1;
+                        }
                     }
                 }
             }

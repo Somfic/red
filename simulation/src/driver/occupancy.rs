@@ -30,9 +30,7 @@ impl SegmentOccupancy {
 
         loop {
             let seg_data = road.segments.get(&segment);
-            let from = road.nodes.get(&seg_data.from);
-            let to = road.nodes.get(&seg_data.to);
-            let segment_length = from.position.distance(to.position);
+            let segment_length = seg_data.length;
 
             let occupants = self.vehicles.get(&segment);
 
