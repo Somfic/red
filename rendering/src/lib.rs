@@ -43,16 +43,15 @@ pub fn test_intersection(mut commands: Commands) {
     let mut road = Road::default();
 
     // Create nodes
-    let north = road.add_edge_node(Vec3::new(0.0, 20.0, 0.0));
-    let south = road.add_edge_node(Vec3::new(0.0, -20.0, 0.0));
-    let east = road.add_edge_node(Vec3::new(20.0, 0.0, 0.0));
-    let west = road.add_edge_node(Vec3::new(-20.0, 0.0, 0.0));
-    let south_east = road.add_edge_node(Vec3::new(20.0, -20.0, 0.0));
+    let north = road.add_edge_node(Vec3::new(0.0, 100.0, 0.0));
+    let south = road.add_edge_node(Vec3::new(30.0, -100.0, 0.0));
+    let east = road.add_edge_node(Vec3::new(100.0, -20.0, 0.0));
+    let west = road.add_edge_node(Vec3::new(-100.0, 100.0, 0.0));
     let center = road.add_node(Vec3::ZERO);
 
     // Create segments (incoming/outgoing wired automatically)
     road.add_bidirectional(north, center, 5.0);
-    // road.add_bidirectional(south, center, 5.0);
+    road.add_bidirectional(south, center, 5.0);
     road.add_bidirectional(east, center, 5.0);
     road.add_bidirectional(west, center, 5.0);
     // road.add_bidirectional(south_east, center, 5.0);
@@ -109,13 +108,30 @@ fn draw_vehicles(
             .geometry
             .position_at(from.position, to.position, vehicle.progress);
 
+        // Calculate heading by sampling two nearby points
+        let epsilon = 0.01;
+        let t0 = (vehicle.progress - epsilon).max(0.0);
+        let t1 = (vehicle.progress + epsilon).min(1.0);
+        let p0 = segment.geometry.position_at(from.position, to.position, t0);
+        let p1 = segment.geometry.position_at(from.position, to.position, t1);
+        let direction = (p1 - p0).normalize_or_zero();
+
+        // Calculate rotation from direction (heading angle around Z axis)
+        let angle = direction.y.atan2(direction.x);
+        let rotation = Quat::from_rotation_z(angle);
+
         let color = if is_player.is_some() {
             Color::linear_rgb(0.2, 0.5, 1.0) // Blue for player
         } else {
             Color::linear_rgb(1.0, 0.0, 0.0) // Red for AI
         };
 
-        gizmos.sphere(position, 0.5, color);
+        // Draw car as oriented rectangle using vehicle's dimensions
+        gizmos.rect(
+            Isometry3d::new(position, rotation),
+            Vec2::new(vehicle.length, vehicle.width),
+            color,
+        );
     }
 }
 

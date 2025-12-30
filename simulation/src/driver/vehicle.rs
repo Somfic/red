@@ -6,6 +6,10 @@ use bevy_ecs::prelude::*;
 use bevy_time::Time;
 use rand::seq::{IndexedRandom, IteratorRandom};
 
+/// Typical car dimensions in meters
+pub const DEFAULT_CAR_LENGTH: f32 = 4.5;
+pub const DEFAULT_CAR_WIDTH: f32 = 1.8;
+
 #[derive(Component)]
 pub struct Vehicle {
     pub speed: f32,
@@ -15,6 +19,10 @@ pub struct Vehicle {
     pub route: Vec<Id<Segment>>,
     pub idm: Idm,
     pub gap: GapAcceptance,
+    /// Vehicle length in meters (front to back)
+    pub length: f32,
+    /// Vehicle width in meters (side to side)
+    pub width: f32,
 }
 
 impl Vehicle {
@@ -29,6 +37,8 @@ impl Vehicle {
             route,
             idm: Idm::new(aggression),
             gap: GapAcceptance::new(aggression),
+            length: DEFAULT_CAR_LENGTH,
+            width: DEFAULT_CAR_WIDTH,
         }
     }
 }

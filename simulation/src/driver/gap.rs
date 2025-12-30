@@ -1,7 +1,17 @@
+//! Gap acceptance model for intersection behavior.
+//!
+//! Units:
+//! - Time/gaps: seconds (s)
+//! - Distance: meters (m)
+//! - Speed: meters per second (m/s)
+
 use bevy_ecs::prelude::*;
 use bevy_time::Time;
 
 use crate::{driver::Vehicle, Road};
+
+/// Minimum physical distance (meters) to approaching vehicle before yielding
+const MIN_SAFE_DISTANCE: f32 = 3.0;
 
 pub struct GapAcceptance {
     pub safe_gap: f32,
@@ -42,6 +52,7 @@ pub fn apply_gap_acceptance(
     road: Res<Road>,
 ) {
     // Collect info about all vehicles approaching intersections
+    // Tuple: (entity, segment, next_segment, progress, speed, length)
     let vehicle_info: Vec<_> = vehicles
         .iter()
         .map(|(entity, v)| {
@@ -51,8 +62,7 @@ pub fn apply_gap_acceptance(
                 v.route.get(1).copied(),
                 v.progress,
                 v.speed,
-                v.idm.aggression,
-                v.gap.waiting_time.is_some(),
+                v.length,
             )
         })
         .collect();
@@ -76,7 +86,7 @@ pub fn apply_gap_acceptance(
             .filter(|i| i.incoming.contains(next_segment))
         {
             if let Some(conflicts) = intersection.conflicts.get(next_segment) {
-                for &(other_entity, other_seg, other_next, other_progress, other_speed, _, _) in
+                for &(other_entity, other_seg, other_next, other_progress, other_speed, other_length) in
                     &vehicle_info
                 {
                     if other_entity == entity {
@@ -100,9 +110,12 @@ pub fn apply_gap_acceptance(
                             let seg = road.segments.get(&other_seg);
                             let remaining = 1.0 - other_progress;
 
-                            // Safety check 2: Minimum physical distance (3 meters)
-                            let distance_to_enter = remaining * seg.length;
-                            if distance_to_enter < 3.0 {
+                            // Distance from front bumper to intersection entry
+                            let distance_to_enter =
+                                (remaining * seg.length - other_length / 2.0).max(0.0);
+
+                            // Safety check 2: Minimum physical distance
+                            if distance_to_enter < MIN_SAFE_DISTANCE {
                                 actual_gap = 0.0;
                                 break;
                             }

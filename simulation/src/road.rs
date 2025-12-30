@@ -1,9 +1,33 @@
+//! Road network representation.
+//!
+//! Units:
+//! - Distance/Position: meters (m)
+//! - Speed: meters per second (m/s)
+//!
+//! Speed reference:
+//! - 30 km/h ≈ 8.3 m/s (residential)
+//! - 50 km/h ≈ 13.9 m/s (urban)
+//! - 80 km/h ≈ 22.2 m/s (highway)
+//! - 120 km/h ≈ 33.3 m/s (motorway)
+
 use std::collections::HashMap;
 
 use bevy_ecs::prelude::*;
 use glam::Vec3;
 
 use crate::{Arena, Id};
+
+/// Speed limit constants in m/s
+pub mod speed {
+    /// 20 km/h - intersection/parking
+    pub const SLOW: f32 = 5.5;
+    /// 30 km/h - residential
+    pub const RESIDENTIAL: f32 = 8.3;
+    /// 50 km/h - urban
+    pub const URBAN: f32 = 13.9;
+    /// 80 km/h - rural/highway
+    pub const HIGHWAY: f32 = 22.2;
+}
 
 #[derive(Resource, Default)]
 pub struct Road {
@@ -88,8 +112,8 @@ impl Road {
     }
 
     pub fn finalize(&mut self) {
-        const INTERSECTION_RADIUS: f32 = 1.0;
-        const LANE_OFFSET: f32 = 0.5;
+        const INTERSECTION_RADIUS: f32 = 7.0;
+        const LANE_OFFSET: f32 = 1.75;
 
         struct EntryData {
             segment_id: Id<Segment>,
@@ -261,7 +285,7 @@ impl Road {
                     let segment_id = self.segments.alloc(Segment {
                         from: entry_node_id,
                         to: exit_node_id,
-                        speed_limit: 5.0, // intersection speed limit
+                        speed_limit: speed::SLOW, // intersection speed limit
                         geometry,
                         length,
                     });
@@ -613,7 +637,7 @@ fn do_segments_conflict(
 
     for p_a in &a_points {
         for p_b in &b_points {
-            if p_a.distance(*p_b) < 0.01 {
+            if p_a.distance(*p_b) < 2.0 {
                 return true;
             }
         }

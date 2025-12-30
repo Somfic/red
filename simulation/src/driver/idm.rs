@@ -1,3 +1,11 @@
+//! Intelligent Driver Model (IDM) for car-following behavior.
+//!
+//! Units:
+//! - Distance: meters (m)
+//! - Speed: meters per second (m/s)
+//! - Acceleration: meters per second squared (m/s²)
+//! - Time: seconds (s)
+
 use bevy_ecs::{
     entity::Entity,
     query::Without,
@@ -10,6 +18,13 @@ use crate::{
     Road,
 };
 
+/// Intelligent Driver Model parameters.
+///
+/// Typical real-world values:
+/// - Time headway: 1.0-2.0 s (safe following distance in time)
+/// - Min spacing: 2.0-5.0 m (bumper-to-bumper distance at standstill)
+/// - Max acceleration: 1.0-3.0 m/s² (comfortable acceleration)
+/// - Comfortable deceleration: 1.5-3.0 m/s² (comfortable braking)
 pub struct Idm {
     pub aggression: f32,
     pub desired_time_headway: f32,
@@ -70,10 +85,12 @@ pub fn apply_idm(
         let segment = road.segments.get(&vehicle.segment);
 
         let next_driver = occupancy.find_next(entity, &vehicle, &road);
-        let distance_to_end = (1.0 - vehicle.progress) * segment.length;
+        // Distance from front bumper to end of segment (stop line)
+        let distance_to_end =
+            ((1.0 - vehicle.progress) * segment.length - vehicle.length / 2.0).max(0.0);
 
         let (gap, delta_speed) = if vehicle.gap.waiting_time.is_some() {
-            // Waiting - stop at end of segment
+            // Waiting - stop at end of segment (front bumper at stop line)
             // Also consider vehicle ahead (take smaller gap)
             if let Some((next_occupant, distance)) = next_driver {
                 let min_gap = distance.min(distance_to_end);

@@ -8,6 +8,8 @@ pub struct Occupant {
     pub vehicle: Entity,
     pub speed: f32,
     pub segment: Id<Segment>,
+    /// Vehicle length in meters (for gap calculations)
+    pub length: f32,
 }
 
 #[derive(Resource, Default)]
@@ -24,7 +26,7 @@ impl SegmentOccupancy {
         }
     }
 
-    /// Returns the next occupant ahead and the distance to them in world units
+    /// Returns the next occupant ahead and the bumper-to-bumper distance in meters
     pub fn find_next(
         &self,
         entity: Entity,
@@ -50,15 +52,17 @@ impl SegmentOccupancy {
                     .find(|occ| occ.progress > progress && occ.vehicle != entity);
 
                 if let Some(occ) = next {
-                    // Calculate distance to this occupant
-                    let distance = if first_segment {
+                    // Calculate center-to-center distance
+                    let center_distance = if first_segment {
                         // Same segment: simple progress difference
                         (occ.progress - vehicle.progress) * segment_length
                     } else {
                         // Different segment: accumulated + their progress
                         accumulated_distance + occ.progress * segment_length
                     };
-                    return Some((occ, distance));
+                    // Convert to bumper-to-bumper distance (front of us to rear of them)
+                    let bumper_distance = center_distance - vehicle.length / 2.0 - occ.length / 2.0;
+                    return Some((occ, bumper_distance.max(0.0)));
                 }
             }
 
@@ -100,6 +104,7 @@ pub fn update_occupancy(
             vehicle: entity,
             speed: vehicle.speed,
             segment: vehicle.segment,
+            length: vehicle.length,
         });
     }
 
