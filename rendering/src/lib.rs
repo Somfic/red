@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use simulation::{
-    driver::{PlayerControlled, Vehicle},
+    driver::{Blinker, PlayerControlled, Vehicle},
     Road, SegmentGeometry, SimulationPlugin,
 };
 use wasm_bindgen::prelude::*;
@@ -33,7 +33,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Projection::from(OrthographicProjection {
-            scale: 0.05,
+            scale: 0.2, // Zoomed out to see more
             ..OrthographicProjection::default_3d()
         }),
         Transform::from_xyz(0.0, 0.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -43,27 +43,47 @@ fn setup(mut commands: Commands) {
 pub fn test_intersection(mut commands: Commands) {
     let mut road = Road::default();
 
-    // Create nodes
-    let north = road.add_edge_node(Vec3::new(10.0, 100.0, 0.0));
-    let south = road.add_edge_node(Vec3::new(10.0, -100.0, 0.0));
-    let east = road.add_edge_node(Vec3::new(100.0, -10.0, 0.0));
-    let west = road.add_edge_node(Vec3::new(-100.0, 10.0, 0.0));
-    let center = road.add_node(Vec3::ZERO);
+    // Grid of intersections
+    let spacing = 80.0;
 
-    // Create segments (incoming/outgoing wired automatically)
-    road.add_bidirectional(north, center, 5.0);
-    road.add_bidirectional(south, center, 5.0);
-    road.add_bidirectional(east, center, 5.0);
-    road.add_bidirectional(west, center, 5.0);
-    // road.add_bidirectional(south_east, center, 5.0);
+    // Create intersection nodes (2x2 grid)
+    let int_nw = road.add_node(Vec3::new(-spacing / 2.0, spacing / 2.0, 0.0));
+    let int_ne = road.add_node(Vec3::new(spacing / 2.0, spacing / 2.0, 0.0));
+    let int_sw = road.add_node(Vec3::new(-spacing / 2.0, -spacing / 2.0, 0.0));
+    let int_se = road.add_node(Vec3::new(spacing / 2.0, -spacing / 2.0, 0.0));
+
+    // Create edge nodes (entry/exit points)
+    let edge_n1 = road.add_edge_node(Vec3::new(-spacing / 2.0, spacing * 1.5, 0.0));
+    let edge_n2 = road.add_edge_node(Vec3::new(spacing / 2.0, spacing * 1.5, 0.0));
+    let edge_s1 = road.add_edge_node(Vec3::new(-spacing / 2.0, -spacing * 1.5, 0.0));
+    let edge_s2 = road.add_edge_node(Vec3::new(spacing / 2.0, -spacing * 1.5, 0.0));
+    let edge_w1 = road.add_edge_node(Vec3::new(-spacing * 1.5, spacing / 2.0, 0.0));
+    let edge_w2 = road.add_edge_node(Vec3::new(-spacing * 1.5, -spacing / 2.0, 0.0));
+    let edge_e1 = road.add_edge_node(Vec3::new(spacing * 1.5, spacing / 2.0, 0.0));
+    let edge_e2 = road.add_edge_node(Vec3::new(spacing * 1.5, -spacing / 2.0, 0.0));
+
+    // Connect intersections horizontally
+    road.add_bidirectional(int_nw, int_ne, 13.9);
+    road.add_bidirectional(int_sw, int_se, 13.9);
+
+    // Connect intersections vertically
+    road.add_bidirectional(int_nw, int_sw, 13.9);
+    road.add_bidirectional(int_ne, int_se, 13.9);
+
+    // Connect to edge nodes (entry/exit roads)
+    road.add_bidirectional(edge_n1, int_nw, 13.9);
+    road.add_bidirectional(edge_n2, int_ne, 13.9);
+    road.add_bidirectional(edge_s1, int_sw, 13.9);
+    road.add_bidirectional(edge_s2, int_se, 13.9);
+    road.add_bidirectional(edge_w1, int_nw, 13.9);
+    road.add_bidirectional(edge_w2, int_sw, 13.9);
+    road.add_bidirectional(edge_e1, int_ne, 13.9);
+    road.add_bidirectional(edge_e2, int_se, 13.9);
 
     // Generate intersection edge nodes and turn segments
     road.finalize();
 
     commands.insert_resource(road);
-
-    // Spawn player-controlled vehicle
-    // commands.spawn((Vehicle::new(seg_north_east), PlayerControlled));
 }
 
 /// Spawn road surface meshes for all segments
@@ -281,7 +301,12 @@ fn draw_vehicles(
     mut gizmos: Gizmos,
     vehicles: Query<(&Vehicle, Option<&PlayerControlled>)>,
     road: Res<Road>,
+    time: Res<Time>,
 ) {
+    // Blink frequency: on for 0.5s, off for 0.5s
+    let blink_on = (time.elapsed_secs() * 2.0) as i32 % 2 == 0;
+    let blinker_color = Color::linear_rgb(1.0, 0.7, 0.0); // Orange/amber
+
     for (vehicle, is_player) in &vehicles {
         let segment = road.segments.get(&vehicle.segment);
         let from = road.nodes.get(&segment.from);
@@ -304,6 +329,9 @@ fn draw_vehicles(
         let angle = direction.y.atan2(direction.x);
         let rotation = Quat::from_rotation_z(angle);
 
+        // Perpendicular for left/right offset
+        let perp = Vec3::new(-direction.y, direction.x, 0.0);
+
         let color = if is_player.is_some() {
             Color::linear_rgb(0.2, 0.5, 1.0) // Blue for player
         } else {
@@ -316,6 +344,38 @@ fn draw_vehicles(
             Vec2::new(vehicle.length, vehicle.width),
             color,
         );
+
+        let half_length = vehicle.length / 2.0;
+        let half_width = vehicle.width / 2.0;
+        let light_size = 0.4;
+
+        // Corner positions
+        let front_left = position + direction * half_length + perp * half_width;
+        let front_right = position + direction * half_length - perp * half_width;
+        let rear_left = position - direction * half_length + perp * half_width;
+        let rear_right = position - direction * half_length - perp * half_width;
+
+        // Draw brake lights (red, at rear)
+        if vehicle.braking {
+            let brake_color = Color::linear_rgb(1.0, 0.0, 0.0); // Bright red
+            gizmos.sphere(rear_left + Vec3::Z * 0.1, light_size, brake_color);
+            gizmos.sphere(rear_right + Vec3::Z * 0.1, light_size, brake_color);
+        }
+
+        // Draw blinkers (orange, blinking)
+        if blink_on && vehicle.blinker != Blinker::None {
+            match vehicle.blinker {
+                Blinker::Left => {
+                    gizmos.sphere(front_left + Vec3::Z * 0.1, light_size, blinker_color);
+                    gizmos.sphere(rear_left + Vec3::Z * 0.1, light_size, blinker_color);
+                }
+                Blinker::Right => {
+                    gizmos.sphere(front_right + Vec3::Z * 0.1, light_size, blinker_color);
+                    gizmos.sphere(rear_right + Vec3::Z * 0.1, light_size, blinker_color);
+                }
+                Blinker::None => {}
+            }
+        }
     }
 }
 
