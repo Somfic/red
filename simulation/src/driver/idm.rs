@@ -39,7 +39,16 @@ impl Idm {
             + (speed * delta_speed)
                 / (2.0 * (self.max_acceleration * self.comfortable_deceleration).sqrt());
 
-        self.max_acceleration * (1.0 - (speed / desired_speed).powi(4) - (s_star / gap).powi(2))
+        let raw = self.max_acceleration
+            * (1.0 - (speed / desired_speed).powi(4) - (s_star / gap).powi(2));
+
+        // Clamp to realistic limits:
+        // - Can't accelerate faster than max_acceleration
+        // - Can't brake harder than 2x comfortable_deceleration (emergency brake)
+        raw.clamp(
+            -self.comfortable_deceleration * 2.0,
+            self.max_acceleration,
+        )
     }
 }
 
