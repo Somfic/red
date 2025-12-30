@@ -6,3 +6,6 @@ pub use vehicle::*;
 
 mod occupancy;
 pub use occupancy::*;
+
+mod pathfinding;
+pub use pathfinding::*;

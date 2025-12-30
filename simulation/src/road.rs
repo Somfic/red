@@ -35,7 +35,12 @@ impl Road {
     }
 
     /// Add a bidirectional road (two segments, one in each direction)
-    pub fn add_bidirectional(&mut self, a: Id<Node>, b: Id<Node>, speed_limit: f32) -> (Id<Segment>, Id<Segment>) {
+    pub fn add_bidirectional(
+        &mut self,
+        a: Id<Node>,
+        b: Id<Node>,
+        speed_limit: f32,
+    ) -> (Id<Segment>, Id<Segment>) {
         let a_to_b = self.add_segment(a, b, speed_limit);
         let b_to_a = self.add_segment(b, a, speed_limit);
         (a_to_b, b_to_a)

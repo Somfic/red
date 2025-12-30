@@ -45,10 +45,7 @@ impl Idm {
         // Clamp to realistic limits:
         // - Can't accelerate faster than max_acceleration
         // - Can't brake harder than 2x comfortable_deceleration (emergency brake)
-        raw.clamp(
-            -self.comfortable_deceleration * 2.0,
-            self.max_acceleration,
-        )
+        raw.clamp(-self.comfortable_deceleration * 2.0, self.max_acceleration)
     }
 }
 

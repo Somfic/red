@@ -1,24 +1,27 @@
 use crate::{
-    driver::{Idm, SegmentOccupancy},
-    Id, Road, Segment,
+    driver::{next_segment_toward, Idm, SegmentOccupancy},
+    Id, Node, Road, Segment,
 };
 use bevy_ecs::prelude::*;
 use bevy_time::Time;
+use rand::seq::IteratorRandom;
 
 #[derive(Component)]
 pub struct Vehicle {
     pub speed: f32,
     pub segment: Id<Segment>,
     pub progress: f32,
+    pub destination: Id<Node>,
     pub idm: Idm,
 }
 
 impl Vehicle {
-    pub fn new(segment: Id<Segment>) -> Self {
+    pub fn new(segment: Id<Segment>, destination: Id<Node>) -> Self {
         Self {
             speed: 0.0,
             segment,
             progress: 0.0,
+            destination,
             idm: Idm::new(rand::random()),
         }
     }
@@ -49,22 +52,13 @@ pub fn move_and_despawn_vehicles(
             if to.outgoing.is_empty() {
                 commands.entity(entity).despawn();
             } else {
-                // Filter out U-turns (segments going back to where we came from)
-                let came_from = segment.from;
-                let valid_segments: Vec<_> = to
-                    .outgoing
-                    .iter()
-                    .filter(|&&seg_id| roads.segments.get(&seg_id).to != came_from)
-                    .collect();
-
-                if valid_segments.is_empty() {
-                    // No valid turns, despawn (or allow U-turn as fallback)
-                    commands.entity(entity).despawn();
-                } else {
-                    let turn_index =
-                        (rand::random::<f32>() * valid_segments.len() as f32).floor() as usize;
-                    vehicle.segment = *valid_segments[turn_index];
-                    vehicle.progress -= 1.0;
+                let next_segment = next_segment_toward(&roads, segment.to, vehicle.destination);
+                match next_segment {
+                    Some(next) => {
+                        vehicle.segment = next;
+                        vehicle.progress -= 1.0;
+                    }
+                    None => commands.entity(entity).despawn(),
                 }
             }
         }
@@ -79,11 +73,17 @@ pub fn spawn_vehicles(mut commands: Commands, roads: Res<Road>, occupancy: Res<S
         .iter()
         .filter(|n| n.incoming.is_empty())
         .for_each(|n| {
-            // 10% chance to spawn a vehicle if below max
             if rand::random::<f32>() < 0.1 {
                 if let Some(seg) = n.outgoing.first() {
-                    if total_vehicles < 5 {
-                        commands.spawn(Vehicle::new(*seg));
+                    if total_vehicles < 15 {
+                        let (node, _) = roads
+                            .nodes
+                            .iter_with_ids()
+                            .filter(|(_, node)| node.outgoing.is_empty())
+                            .choose(&mut rand::rng())
+                            .unwrap();
+
+                        commands.spawn(Vehicle::new(*seg, node));
                         total_vehicles += 1;
                     }
                 }
