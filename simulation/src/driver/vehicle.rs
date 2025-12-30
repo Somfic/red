@@ -4,7 +4,7 @@ use crate::{
 };
 use bevy_ecs::prelude::*;
 use bevy_time::Time;
-use rand::seq::IteratorRandom;
+use rand::seq::{IndexedRandom, IteratorRandom};
 
 #[derive(Component)]
 pub struct Vehicle {
@@ -71,15 +71,15 @@ pub fn spawn_vehicles(mut commands: Commands, roads: Res<Road>, occupancy: Res<S
     roads
         .nodes
         .iter()
-        .filter(|n| n.incoming.is_empty())
+        .filter(|n| n.is_spawn && !n.outgoing.is_empty())
         .for_each(|n| {
             if rand::random::<f32>() < 0.1 {
-                if let Some(seg) = n.outgoing.first() {
+                if let Some(seg) = n.outgoing.choose(&mut rand::rng()) {
                     if total_vehicles < 15 {
                         let (node, _) = roads
                             .nodes
                             .iter_with_ids()
-                            .filter(|(_, node)| node.outgoing.is_empty())
+                            .filter(|(_, node)| node.is_despawn && node.position != n.position)
                             .choose(&mut rand::rng())
                             .unwrap();
 

@@ -10,12 +10,43 @@ pub struct Road {
 }
 
 impl Road {
-    /// Add a node at the given position
     pub fn add_node(&mut self, position: Vec3) -> Id<Node> {
         self.nodes.alloc(Node {
             position,
             incoming: vec![],
             outgoing: vec![],
+            is_spawn: false,
+            is_despawn: false,
+        })
+    }
+
+    pub fn add_spawn_node(&mut self, position: Vec3) -> Id<Node> {
+        self.nodes.alloc(Node {
+            position,
+            incoming: vec![],
+            outgoing: vec![],
+            is_spawn: true,
+            is_despawn: false,
+        })
+    }
+
+    pub fn add_despawn_node(&mut self, position: Vec3) -> Id<Node> {
+        self.nodes.alloc(Node {
+            position,
+            incoming: vec![],
+            outgoing: vec![],
+            is_spawn: false,
+            is_despawn: true,
+        })
+    }
+
+    pub fn add_edge_node(&mut self, position: Vec3) -> Id<Node> {
+        self.nodes.alloc(Node {
+            position,
+            incoming: vec![],
+            outgoing: vec![],
+            is_spawn: true,
+            is_despawn: true,
         })
     }
 
@@ -51,6 +82,8 @@ pub struct Node {
     pub position: Vec3,
     pub incoming: Vec<Id<Segment>>,
     pub outgoing: Vec<Id<Segment>>,
+    pub is_spawn: bool,
+    pub is_despawn: bool,
 }
 
 pub struct Segment {

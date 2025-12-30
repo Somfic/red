@@ -43,25 +43,17 @@ pub fn test_intersection(mut commands: Commands) {
     let mut road = Road::default();
 
     // Create nodes
-    let north_entry = road.add_node(Vec3::new(0.0, 10.0, 0.0));
-    let north_exit = road.add_node(Vec3::new(0.0, 10.0, 0.0));
-    let east_entry = road.add_node(Vec3::new(10.0, 0.0, 0.0));
-    let east_exit = road.add_node(Vec3::new(10.0, 0.0, 0.0));
-    let south_entry = road.add_node(Vec3::new(0.0, -10.0, 0.0));
-    let south_exit = road.add_node(Vec3::new(0.0, -10.0, 0.0));
-    let west_entry = road.add_node(Vec3::new(-10.0, 0.0, 0.0));
-    let west_exit = road.add_node(Vec3::new(-10.0, 0.0, 0.0));
+    let north = road.add_edge_node(Vec3::new(0.0, 20.0, 0.0));
+    let south = road.add_edge_node(Vec3::new(0.0, -20.0, 0.0));
+    let east = road.add_edge_node(Vec3::new(20.0, 0.0, 0.0));
+    let west = road.add_edge_node(Vec3::new(-20.0, 0.0, 0.0));
     let center = road.add_node(Vec3::ZERO);
 
     // Create segments (incoming/outgoing wired automatically)
-    road.add_segment(north_entry, center, 5.0);
-    road.add_segment(center, north_exit, 5.0);
-    road.add_segment(east_entry, center, 5.0);
-    road.add_segment(center, east_exit, 5.0);
-    road.add_segment(south_entry, center, 5.0);
-    road.add_segment(center, south_exit, 5.0);
-    road.add_segment(west_entry, center, 5.0);
-    road.add_segment(center, west_exit, 5.0);
+    road.add_bidirectional(north, center, 5.0);
+    road.add_bidirectional(south, center, 5.0);
+    road.add_bidirectional(east, center, 5.0);
+    road.add_bidirectional(west, center, 5.0);
 
     commands.insert_resource(road);
 
