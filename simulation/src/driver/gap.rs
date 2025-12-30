@@ -86,8 +86,14 @@ pub fn apply_gap_acceptance(
             .filter(|i| i.incoming.contains(next_segment))
         {
             if let Some(conflicts) = intersection.conflicts.get(next_segment) {
-                for &(other_entity, other_seg, other_next, other_progress, other_speed, other_length) in
-                    &vehicle_info
+                for &(
+                    other_entity,
+                    other_seg,
+                    other_next,
+                    other_progress,
+                    other_speed,
+                    other_length,
+                ) in &vehicle_info
                 {
                     if other_entity == entity {
                         continue; // skip self
