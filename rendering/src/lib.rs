@@ -1,4 +1,7 @@
-use bevy::prelude::*;
+use bevy::{
+    light::{DirectionalLightShadowMap, PointLightShadowMap},
+    prelude::*,
+};
 use simulation::{
     driver::{Blinker, PlayerControlled, Vehicle},
     Road, SegmentGeometry, SimulationPlugin,
@@ -7,6 +10,20 @@ use wasm_bindgen::prelude::*;
 
 /// Road width in meters (single lane)
 const LANE_WIDTH: f32 = 3.5;
+/// Vehicle height in meters
+const CAR_HEIGHT: f32 = 1.2;
+
+/// Marker component for vehicles that have render meshes attached
+#[derive(Component)]
+struct VehicleRender;
+
+/// Resource holding shared vehicle mesh and materials
+#[derive(Resource)]
+struct VehicleAssets {
+    mesh: Handle<Mesh>,
+    ai_material: Handle<StandardMaterial>,
+    player_material: Handle<StandardMaterial>,
+}
 
 #[wasm_bindgen(start)]
 pub fn start() {
@@ -24,20 +41,81 @@ pub fn start() {
         .add_plugins(SimulationPlugin)
         .add_systems(Startup, (setup, test_intersection))
         .add_systems(Startup, spawn_road_meshes.after(test_intersection))
-        .add_systems(Update, (draw_edge_lines, draw_vehicles, player_input))
+        .add_systems(
+            Update,
+            (
+                draw_edge_lines,
+                spawn_vehicle_meshes,
+                update_vehicle_transforms,
+                draw_vehicle_lights,
+                player_input,
+            ),
+        )
         .run();
 }
 
-fn setup(mut commands: Commands) {
-    // Camera - orthographic 3D looking down at XY plane
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // Isometric camera setup
+    // Classic isometric: 45° rotation around vertical, ~30° elevation angle
+    let distance = 120.0;
+
     commands.spawn((
         Camera3d::default(),
         Projection::from(OrthographicProjection {
-            scale: 0.2, // Zoomed out to see more
+            scale: 0.09,
             ..OrthographicProjection::default_3d()
         }),
-        Transform::from_xyz(0.0, 0.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
+        // Position camera at isometric angle: (d, -d, d*0.7) looking at center
+        Transform::from_xyz(distance, -distance, distance * 0.7).looking_at(Vec3::ZERO, Vec3::Z),
     ));
+
+    // Simulate directional light with distant point light
+    // Far away = nearly parallel rays like sunlight
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: true,
+            shadow_depth_bias: 0.01,
+            illuminance: 20000.0,
+            ..default()
+        },
+        // Far away, low angle for long shadows
+        Transform::from_xyz(-500.0, 500.0, 200.0),
+    ));
+
+    // Low ambient so shadows are visible
+    commands.insert_resource(AmbientLight {
+        color: Color::WHITE,
+        brightness: 80.0,
+        ..default()
+    });
+
+    // Higher resolution shadow map
+    commands.insert_resource(DirectionalLightShadowMap {
+        size: 2048, // try 1024 or 2048 on web
+    });
+
+    // Create shared vehicle assets
+    let mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+
+    let ai_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.8, 0.1, 0.1), // Red for AI
+        ..default()
+    });
+
+    let player_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 0.5, 1.0), // Blue for player
+        ..default()
+    });
+
+    commands.insert_resource(VehicleAssets {
+        mesh,
+        ai_material,
+        player_material,
+    });
 }
 
 pub fn test_intersection(mut commands: Commands) {
@@ -94,11 +172,7 @@ fn spawn_road_meshes(
     road: Res<Road>,
 ) {
     let road_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.2, 0.2, 0.22), // Dark gray asphalt
-        unlit: true,
-        double_sided: true,
-        cull_mode: None,
-        alpha_mode: AlphaMode::Opaque,
+        base_color: Color::srgb(0.3, 0.3, 0.32), // Dark gray asphalt
         ..default()
     });
 
@@ -157,17 +231,17 @@ fn build_segment_mesh(geometry: &SegmentGeometry, from: Vec3, to: Vec3, width: f
         uvs.push([0.0, t]);
         uvs.push([1.0, t]);
 
-        // Add triangles (two per quad) - counter-clockwise winding for front face
+        // Add triangles (two per quad) - counter-clockwise winding for +Z normal
         if i < steps {
             let base = (i * 2) as u32;
-            // First triangle
+            // First triangle (flipped winding)
             indices.push(base);
-            indices.push(base + 2);
-            indices.push(base + 1);
-            // Second triangle
             indices.push(base + 1);
             indices.push(base + 2);
+            // Second triangle (flipped winding)
+            indices.push(base + 1);
             indices.push(base + 3);
+            indices.push(base + 2);
         }
     }
 
@@ -297,81 +371,107 @@ fn draw_edge_lines(mut gizmos: Gizmos, road: Res<Road>) {
     }
 }
 
-fn draw_vehicles(
-    mut gizmos: Gizmos,
-    vehicles: Query<(&Vehicle, Option<&PlayerControlled>)>,
-    road: Res<Road>,
-    time: Res<Time>,
+/// Spawn mesh components for vehicles that don't have them yet
+fn spawn_vehicle_meshes(
+    mut commands: Commands,
+    vehicles: Query<(Entity, Option<&PlayerControlled>), (With<Vehicle>, Without<VehicleRender>)>,
+    assets: Res<VehicleAssets>,
 ) {
-    // Blink frequency: on for 0.5s, off for 0.5s
-    let blink_on = (time.elapsed_secs() * 2.0) as i32 % 2 == 0;
-    let blinker_color = Color::linear_rgb(1.0, 0.7, 0.0); // Orange/amber
+    for (entity, is_player) in &vehicles {
+        let material = if is_player.is_some() {
+            assets.player_material.clone()
+        } else {
+            assets.ai_material.clone()
+        };
 
-    for (vehicle, is_player) in &vehicles {
+        commands.entity(entity).insert((
+            VehicleRender,
+            Mesh3d(assets.mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::default(),
+            Visibility::Visible,
+        ));
+    }
+}
+
+/// Update vehicle mesh transforms based on simulation state
+fn update_vehicle_transforms(
+    mut vehicles: Query<(&Vehicle, &mut Transform), With<VehicleRender>>,
+    road: Res<Road>,
+) {
+    for (vehicle, mut transform) in &mut vehicles {
         let segment = road.segments.get(&vehicle.segment);
         let from = road.nodes.get(&segment.from);
         let to = road.nodes.get(&segment.to);
 
-        // Lane offset is baked into node positions by finalize()
         let position = segment
             .geometry
             .position_at(from.position, to.position, vehicle.progress);
 
-        // Calculate heading by sampling two nearby points
+        // Calculate heading
         let epsilon = 0.01;
         let t0 = (vehicle.progress - epsilon).max(0.0);
         let t1 = (vehicle.progress + epsilon).min(1.0);
         let p0 = segment.geometry.position_at(from.position, to.position, t0);
         let p1 = segment.geometry.position_at(from.position, to.position, t1);
         let direction = (p1 - p0).normalize_or_zero();
-
-        // Calculate rotation from direction (heading angle around Z axis)
         let angle = direction.y.atan2(direction.x);
-        let rotation = Quat::from_rotation_z(angle);
 
-        // Perpendicular for left/right offset
+        // Position at center of car (raised by half height)
+        let car_center = position + Vec3::Z * (CAR_HEIGHT / 2.0);
+
+        *transform = Transform::from_translation(car_center)
+            .with_rotation(Quat::from_rotation_z(angle))
+            .with_scale(Vec3::new(vehicle.length, vehicle.width, CAR_HEIGHT));
+    }
+}
+
+/// Draw vehicle lights (blinkers, brake lights) using gizmos
+fn draw_vehicle_lights(
+    mut gizmos: Gizmos,
+    vehicles: Query<(&Vehicle, &Transform)>,
+    time: Res<Time>,
+) {
+    let blink_on = (time.elapsed_secs() * 2.0) as i32 % 2 == 0;
+    let blinker_color = Color::linear_rgb(1.0, 0.7, 0.0);
+
+    for (vehicle, transform) in &vehicles {
+        let position = transform.translation - Vec3::Z * (CAR_HEIGHT / 2.0);
+        let angle = transform.rotation.to_euler(EulerRot::ZYX).0;
+        let direction = Vec3::new(angle.cos(), angle.sin(), 0.0);
         let perp = Vec3::new(-direction.y, direction.x, 0.0);
-
-        let color = if is_player.is_some() {
-            Color::linear_rgb(0.2, 0.5, 1.0) // Blue for player
-        } else {
-            Color::linear_rgb(1.0, 0.0, 0.0) // Red for AI
-        };
-
-        // Draw car as oriented rectangle using vehicle's dimensions
-        gizmos.rect(
-            Isometry3d::new(position, rotation),
-            Vec2::new(vehicle.length, vehicle.width),
-            color,
-        );
 
         let half_length = vehicle.length / 2.0;
         let half_width = vehicle.width / 2.0;
-        let light_size = 0.4;
+        let light_size = 0.35;
+        let light_height = CAR_HEIGHT * 0.4;
 
-        // Corner positions
-        let front_left = position + direction * half_length + perp * half_width;
-        let front_right = position + direction * half_length - perp * half_width;
-        let rear_left = position - direction * half_length + perp * half_width;
-        let rear_right = position - direction * half_length - perp * half_width;
+        let front_left =
+            position + direction * half_length + perp * half_width + Vec3::Z * light_height;
+        let front_right =
+            position + direction * half_length - perp * half_width + Vec3::Z * light_height;
+        let rear_left =
+            position - direction * half_length + perp * half_width + Vec3::Z * light_height;
+        let rear_right =
+            position - direction * half_length - perp * half_width + Vec3::Z * light_height;
 
-        // Draw brake lights (red, at rear)
+        // Brake lights
         if vehicle.braking {
-            let brake_color = Color::linear_rgb(1.0, 0.0, 0.0); // Bright red
-            gizmos.sphere(rear_left + Vec3::Z * 0.1, light_size, brake_color);
-            gizmos.sphere(rear_right + Vec3::Z * 0.1, light_size, brake_color);
+            let brake_color = Color::linear_rgb(1.0, 0.0, 0.0);
+            gizmos.sphere(rear_left, light_size, brake_color);
+            gizmos.sphere(rear_right, light_size, brake_color);
         }
 
-        // Draw blinkers (orange, blinking)
+        // Blinkers
         if blink_on && vehicle.blinker != Blinker::None {
             match vehicle.blinker {
                 Blinker::Left => {
-                    gizmos.sphere(front_left + Vec3::Z * 0.1, light_size, blinker_color);
-                    gizmos.sphere(rear_left + Vec3::Z * 0.1, light_size, blinker_color);
+                    gizmos.sphere(front_left, light_size, blinker_color);
+                    gizmos.sphere(rear_left, light_size, blinker_color);
                 }
                 Blinker::Right => {
-                    gizmos.sphere(front_right + Vec3::Z * 0.1, light_size, blinker_color);
-                    gizmos.sphere(rear_right + Vec3::Z * 0.1, light_size, blinker_color);
+                    gizmos.sphere(front_right, light_size, blinker_color);
+                    gizmos.sphere(rear_right, light_size, blinker_color);
                 }
                 Blinker::None => {}
             }
