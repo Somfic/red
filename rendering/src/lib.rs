@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use simulation::{
     driver::{PlayerControlled, Vehicle},
-    prelude::*,
+    Road, SimulationPlugin,
 };
 use wasm_bindgen::prelude::*;
 
@@ -43,59 +43,30 @@ pub fn test_intersection(mut commands: Commands) {
     let mut road = Road::default();
 
     // Create nodes
-    let north = road.nodes.alloc(Node {
-        position: Vec3::new(0.0, 10.0, 0.0),
-        outgoing: vec![],
-    });
-    let east = road.nodes.alloc(Node {
-        position: Vec3::new(10.0, 0.0, 0.0),
-        outgoing: vec![],
-    });
-    let south = road.nodes.alloc(Node {
-        position: Vec3::new(0.0, -10.0, 0.0),
-        outgoing: vec![],
-    });
-    let west = road.nodes.alloc(Node {
-        position: Vec3::new(-10.0, 0.0, 0.0),
-        outgoing: vec![],
-    });
+    let north_entry = road.add_node(Vec3::new(0.0, 10.0, 0.0));
+    let north_exit = road.add_node(Vec3::new(0.0, 10.0, 0.0));
+    let east_entry = road.add_node(Vec3::new(10.0, 0.0, 0.0));
+    let east_exit = road.add_node(Vec3::new(10.0, 0.0, 0.0));
+    let south_entry = road.add_node(Vec3::new(0.0, -10.0, 0.0));
+    let south_exit = road.add_node(Vec3::new(0.0, -10.0, 0.0));
+    let west_entry = road.add_node(Vec3::new(-10.0, 0.0, 0.0));
+    let west_exit = road.add_node(Vec3::new(-10.0, 0.0, 0.0));
+    let center = road.add_node(Vec3::ZERO);
 
-    // Create segments
-    let seg_north_east = road.segments.alloc(Segment {
-        from: north,
-        to: east,
-        speed_limit: 5.0,
-    });
-    let seg_east_south = road.segments.alloc(Segment {
-        from: east,
-        to: south,
-        speed_limit: 5.0,
-    });
-    let seg_south_west = road.segments.alloc(Segment {
-        from: south,
-        to: west,
-        speed_limit: 5.0,
-    });
-    let seg_west_north = road.segments.alloc(Segment {
-        from: west,
-        to: north,
-        speed_limit: 5.0,
-    });
-
-    // Wire up outgoing connections
-    road.nodes.get_mut(&north).outgoing.push(seg_north_east);
-    road.nodes.get_mut(&east).outgoing.push(seg_east_south);
-    road.nodes.get_mut(&south).outgoing.push(seg_south_west);
-    road.nodes.get_mut(&west).outgoing.push(seg_west_north);
+    // Create segments (incoming/outgoing wired automatically)
+    road.add_segment(north_entry, center, 5.0);
+    road.add_segment(center, north_exit, 5.0);
+    road.add_segment(east_entry, center, 5.0);
+    road.add_segment(center, east_exit, 5.0);
+    road.add_segment(south_entry, center, 5.0);
+    road.add_segment(center, south_exit, 5.0);
+    road.add_segment(west_entry, center, 5.0);
+    road.add_segment(center, west_exit, 5.0);
 
     commands.insert_resource(road);
 
-    commands.spawn(Vehicle::new(seg_west_north));
-    commands.spawn(Vehicle::new(seg_south_west));
-    commands.spawn(Vehicle::new(seg_east_south));
-
     // Spawn player-controlled vehicle
-    commands.spawn((Vehicle::new(seg_north_east), PlayerControlled));
+    // commands.spawn((Vehicle::new(seg_north_east), PlayerControlled));
 }
 
 fn draw_segments(mut gizmos: Gizmos, road: Res<Road>) {

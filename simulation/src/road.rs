@@ -9,8 +9,42 @@ pub struct Road {
     pub segments: Arena<Segment>,
 }
 
+impl Road {
+    /// Add a node at the given position
+    pub fn add_node(&mut self, position: Vec3) -> Id<Node> {
+        self.nodes.alloc(Node {
+            position,
+            incoming: vec![],
+            outgoing: vec![],
+        })
+    }
+
+    /// Add a segment between two nodes, automatically wiring up incoming/outgoing
+    pub fn add_segment(&mut self, from: Id<Node>, to: Id<Node>, speed_limit: f32) -> Id<Segment> {
+        let segment_id = self.segments.alloc(Segment {
+            from,
+            to,
+            speed_limit,
+        });
+
+        // Wire up the connections
+        self.nodes.get_mut(&from).outgoing.push(segment_id);
+        self.nodes.get_mut(&to).incoming.push(segment_id);
+
+        segment_id
+    }
+
+    /// Add a bidirectional road (two segments, one in each direction)
+    pub fn add_bidirectional(&mut self, a: Id<Node>, b: Id<Node>, speed_limit: f32) -> (Id<Segment>, Id<Segment>) {
+        let a_to_b = self.add_segment(a, b, speed_limit);
+        let b_to_a = self.add_segment(b, a, speed_limit);
+        (a_to_b, b_to_a)
+    }
+}
+
 pub struct Node {
     pub position: Vec3,
+    pub incoming: Vec<Id<Segment>>,
     pub outgoing: Vec<Id<Segment>>,
 }
 

@@ -31,26 +31,3 @@ impl VehicleSpawner {
         self
     }
 }
-
-pub fn spawn_vehicles(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut spawners: Query<&mut VehicleSpawner>,
-) {
-    for mut spawner in &mut spawners {
-        spawner.timer -= time.delta_secs();
-
-        if spawner.timer <= 0.0 {
-            // Spawn a new vehicle
-            commands.spawn((Vehicle {
-                speed: spawner.vehicle_speed,
-                segment: spawner.segment,
-                progress: 0.0,
-                idm: Idm::new(rand::random()),
-            },));
-
-            // Reset timer
-            spawner.timer = 1.0 / spawner.rate;
-        }
-    }
-}
