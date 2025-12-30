@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use simulation::{
-    driver::{Idm, Vehicle},
+    driver::{PlayerControlled, Vehicle},
     prelude::*,
 };
 use wasm_bindgen::prelude::*;
@@ -20,7 +20,7 @@ pub fn start() {
         }))
         .add_plugins(SimulationPlugin)
         .add_systems(Startup, (setup, test_intersection))
-        .add_systems(Update, (draw_vehicles, draw_segments))
+        .add_systems(Update, (draw_vehicles, draw_segments, player_input))
         .run();
 }
 
@@ -93,7 +93,9 @@ pub fn test_intersection(mut commands: Commands) {
     commands.spawn(Vehicle::new(seg_west_north));
     commands.spawn(Vehicle::new(seg_south_west));
     commands.spawn(Vehicle::new(seg_east_south));
-    // commands.spawn(Vehicle::new(seg_north_east));
+
+    // Spawn player-controlled vehicle
+    commands.spawn((Vehicle::new(seg_north_east), PlayerControlled));
 }
 
 fn draw_segments(mut gizmos: Gizmos, road: Res<Road>) {
@@ -109,13 +111,43 @@ fn draw_segments(mut gizmos: Gizmos, road: Res<Road>) {
     }
 }
 
-fn draw_vehicles(mut gizmos: Gizmos, vehicles: Query<&Vehicle>, road: Res<Road>) {
-    for vehicle in &vehicles {
+fn draw_vehicles(
+    mut gizmos: Gizmos,
+    vehicles: Query<(&Vehicle, Option<&PlayerControlled>)>,
+    road: Res<Road>,
+) {
+    for (vehicle, is_player) in &vehicles {
         let segment = road.segments.get(&vehicle.segment);
         let from = road.nodes.get(&segment.from);
         let to = road.nodes.get(&segment.to);
 
         let position = from.position.lerp(to.position, vehicle.progress);
-        gizmos.sphere(position, 0.5, Color::linear_rgb(1.0, 0.0, 0.0));
+
+        let color = if is_player.is_some() {
+            Color::linear_rgb(0.2, 0.5, 1.0) // Blue for player
+        } else {
+            Color::linear_rgb(1.0, 0.0, 0.0) // Red for AI
+        };
+
+        gizmos.sphere(position, 0.5, color);
     }
+}
+
+fn player_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut player: Query<&mut Vehicle, With<PlayerControlled>>,
+    time: Res<Time>,
+) {
+    let Ok(mut vehicle) = player.single_mut() else {
+        return;
+    };
+
+    if keyboard.pressed(KeyCode::KeyW) || keyboard.pressed(KeyCode::ArrowUp) {
+        vehicle.speed += 5.0 * time.delta_secs(); // Accelerate
+    }
+    if keyboard.pressed(KeyCode::KeyS) || keyboard.pressed(KeyCode::ArrowDown) {
+        vehicle.speed -= 8.0 * time.delta_secs(); // Brake
+    }
+
+    vehicle.speed = vehicle.speed.clamp(0.0, 10.0);
 }

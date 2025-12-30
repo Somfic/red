@@ -1,11 +1,12 @@
 use bevy_ecs::{
     entity::Entity,
+    query::Without,
     system::{Query, Res},
 };
 use bevy_time::Time;
 
 use crate::{
-    driver::{SegmentOccupancy, Vehicle},
+    driver::{PlayerControlled, SegmentOccupancy, Vehicle},
     Road,
 };
 
@@ -55,7 +56,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 
 pub fn apply_idm(
     time: Res<Time>,
-    mut vehicles: Query<(Entity, &mut Vehicle)>,
+    mut vehicles: Query<(Entity, &mut Vehicle), Without<PlayerControlled>>,
     occupancy: Res<SegmentOccupancy>,
     road: Res<Road>,
 ) {

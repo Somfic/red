@@ -19,3 +19,7 @@ impl Vehicle {
         }
     }
 }
+
+/// Marker component for the player-controlled vehicle
+#[derive(Component)]
+pub struct PlayerControlled;
