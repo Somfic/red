@@ -62,27 +62,12 @@ pub fn apply_idm(
 ) {
     for (entity, mut vehicle) in &mut vehicles {
         let segment = road.segments.get(&vehicle.segment);
-        let from = road.nodes.get(&segment.from);
-        let to = road.nodes.get(&segment.to);
-        let segment_length = from.position.distance(to.position);
 
         let next_driver = occupancy.find_next(entity, &vehicle, &road);
 
-        let (gap, delta_speed) = if let Some((next_occupant, same_segment)) = next_driver {
-            let gap = if same_segment {
-                // Same segment: simple progress difference
-                (next_occupant.progress - vehicle.progress) * segment_length
-            } else {
-                // Next segment: remaining distance on current + progress on next
-                let next_seg = road.segments.get(&next_occupant.segment);
-                let next_from = road.nodes.get(&next_seg.from);
-                let next_to = road.nodes.get(&next_seg.to);
-                let next_length = next_from.position.distance(next_to.position);
-
-                (1.0 - vehicle.progress) * segment_length + next_occupant.progress * next_length
-            };
+        let (gap, delta_speed) = if let Some((next_occupant, distance)) = next_driver {
             let delta_speed = vehicle.speed - next_occupant.speed;
-            (gap, delta_speed)
+            (distance, delta_speed)
         } else {
             (f32::MAX, 0.0)
         };

@@ -15,19 +15,25 @@ pub struct SegmentOccupancy {
 }
 
 impl SegmentOccupancy {
-    /// Returns the next occupant ahead and whether they're on the same segment
+    /// Returns the next occupant ahead and the distance to them in world units
     pub fn find_next(
         &self,
         entity: Entity,
         vehicle: &Vehicle,
         road: &Road,
-    ) -> Option<(&Occupant, bool)> {
+    ) -> Option<(&Occupant, f32)> {
         let mut segment = vehicle.segment;
         let mut max_iteration = 10;
         let mut progress = vehicle.progress;
-        let mut same_segment = true;
+        let mut accumulated_distance: f32 = 0.0;
+        let mut first_segment = true;
 
         loop {
+            let seg_data = road.segments.get(&segment);
+            let from = road.nodes.get(&seg_data.from);
+            let to = road.nodes.get(&seg_data.to);
+            let segment_length = from.position.distance(to.position);
+
             let occupants = self.vehicles.get(&segment);
 
             if let Some(occupants) = occupants {
@@ -37,20 +43,34 @@ impl SegmentOccupancy {
                     .find(|occ| occ.progress > progress && occ.vehicle != entity);
 
                 if let Some(occ) = next {
-                    return Some((occ, same_segment));
+                    // Calculate distance to this occupant
+                    let distance = if first_segment {
+                        // Same segment: simple progress difference
+                        (occ.progress - vehicle.progress) * segment_length
+                    } else {
+                        // Different segment: accumulated + their progress
+                        accumulated_distance + occ.progress * segment_length
+                    };
+                    return Some((occ, distance));
                 }
             }
 
+            // Add remaining distance on this segment before moving to next
+            if first_segment {
+                accumulated_distance += (1.0 - vehicle.progress) * segment_length;
+                first_segment = false;
+            } else {
+                accumulated_distance += segment_length;
+            }
+
             // Look at next segment
-            same_segment = false;
             progress = f32::MIN;
             max_iteration -= 1;
             if max_iteration == 0 {
                 return None;
             }
 
-            let seg = road.segments.get(&segment);
-            let to_node = road.nodes.get(&seg.to);
+            let to_node = road.nodes.get(&seg_data.to);
             if to_node.outgoing.is_empty() {
                 return None;
             } else {
