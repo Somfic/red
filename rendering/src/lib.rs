@@ -256,6 +256,18 @@ fn draw_edge_lines(mut gizmos: Gizmos, road: Res<Road>) {
                 } else {
                     gizmos.line(right0, right1, edge_color);
                 }
+
+                // Draw dashed guide line along inner edge (skip every other segment)
+                if i % 2 == 0 {
+                    // Inner edge is the one closer to intersection center
+                    if left_dist > right_dist {
+                        // Left is outer, so right is inner
+                        gizmos.line(right0, right1, edge_color);
+                    } else {
+                        // Right is outer, so left is inner
+                        gizmos.line(left0, left1, edge_color);
+                    }
+                }
             } else {
                 // For regular segments, draw both edges
                 gizmos.line(left0, left1, edge_color);
