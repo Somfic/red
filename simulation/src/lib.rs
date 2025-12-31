@@ -19,7 +19,6 @@ macro_rules! log {
 }
 
 pub use arena::*;
-use bevy_time::Time;
 pub use road::*;
 pub use spawner::*;
 

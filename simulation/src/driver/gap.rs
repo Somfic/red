@@ -14,21 +14,18 @@ use crate::{driver::Vehicle, Road};
 const MIN_SAFE_DISTANCE: f32 = 3.0;
 
 pub struct GapAcceptance {
-    pub safe_gap: f32,
-    pub urgency_rate: f32,
     pub min_gap: f32,
     pub waiting_time: Option<f32>,
+    /// Set when deadlock detection grants priority - skip gap checks until segment transition
+    pub cleared_to_go: bool,
 }
-
-const URGENCY_RATE: f32 = 0.15;
 
 impl GapAcceptance {
     pub fn new(aggression: f32) -> Self {
         Self {
-            safe_gap: blend(3.0, 1.0, aggression, 0.5),
-            urgency_rate: URGENCY_RATE,
             min_gap: blend(1.5, 1.0, aggression, 0.2),
             waiting_time: None,
+            cleared_to_go: false,
         }
     }
 }
@@ -52,7 +49,7 @@ pub fn apply_gap_acceptance(
     road: Res<Road>,
 ) {
     // Collect info about all vehicles approaching intersections
-    // Tuple: (entity, segment, next_segment, progress, speed, length)
+    // Tuple: (entity, segment, next_segment, progress, speed, length, waiting_time)
     let vehicle_info: Vec<_> = vehicles
         .iter()
         .map(|(entity, v)| {
@@ -63,6 +60,7 @@ pub fn apply_gap_acceptance(
                 v.progress,
                 v.speed,
                 v.length,
+                v.gap.waiting_time.unwrap_or(0.0),
             )
         })
         .collect();
@@ -73,9 +71,7 @@ pub fn apply_gap_acceptance(
             None => continue,
         };
 
-        let critical_time = (vehicle.gap.safe_gap
-            * f32::exp(-vehicle.gap.urgency_rate * vehicle.gap.waiting_time.unwrap_or(0.0)))
-        .max(vehicle.gap.min_gap);
+        let critical_time = vehicle.gap.min_gap;
 
         let mut actual_gap = f32::MAX;
 
@@ -93,6 +89,7 @@ pub fn apply_gap_acceptance(
                     other_progress,
                     other_speed,
                     other_length,
+                    other_waiting_time,
                 ) in &vehicle_info
                 {
                     if other_entity == entity {
@@ -113,6 +110,27 @@ pub fn apply_gap_acceptance(
                     // Check vehicles approaching conflicting segments
                     if let Some(other_next_seg) = other_next {
                         if conflicts.contains(&other_next_seg) {
+                            // Priority check
+                            let my_turn = road.segments.get(next_segment).turn_type;
+                            let my_dir = *intersection.entry_directions.get(next_segment).unwrap();
+
+                            let their_turn = road.segments.get(&other_next_seg).turn_type;
+                            let their_dir =
+                                *intersection.entry_directions.get(&other_next_seg).unwrap();
+
+                            if intersection.yield_resolver.has_priority(
+                                my_turn,
+                                my_dir,
+                                entity,
+                                vehicle.gap.waiting_time.unwrap_or(0.0),
+                                their_turn,
+                                their_dir,
+                                other_entity,
+                                other_waiting_time,
+                            ) {
+                                continue; // I have priority, don't yield to this vehicle
+                            }
+
                             let seg = road.segments.get(&other_seg);
                             let remaining = 1.0 - other_progress;
 
@@ -135,11 +153,14 @@ pub fn apply_gap_acceptance(
         }
 
         if actual_gap < critical_time {
+            // Must wait - accumulate waiting time for deadlock detection
             let current = vehicle.gap.waiting_time.unwrap_or(0.0);
             vehicle.gap.waiting_time = Some(current + time.delta_secs());
+            vehicle.gap.cleared_to_go = false;
         } else {
-            // Clear if gap is acceptable (not just if it's MAX)
-            vehicle.gap.waiting_time = None;
+            // Gap is acceptable - tell IDM we can go
+            // Keep waiting_time for deadlock detection (cleared on segment transition)
+            vehicle.gap.cleared_to_go = true;
         }
     }
 }

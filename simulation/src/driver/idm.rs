@@ -89,7 +89,7 @@ pub fn apply_idm(
         let distance_to_end =
             ((1.0 - vehicle.progress) * segment.length - vehicle.length / 2.0).max(0.0);
 
-        let (gap, delta_speed) = if vehicle.gap.waiting_time.is_some() {
+        let (gap, delta_speed) = if vehicle.gap.waiting_time.is_some() && !vehicle.gap.cleared_to_go {
             // Waiting - stop at end of segment (front bumper at stop line)
             // Also consider vehicle ahead (take smaller gap)
             if let Some((next_occupant, distance)) = next_driver {

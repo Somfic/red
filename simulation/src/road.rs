@@ -249,6 +249,7 @@ impl Road {
             // 2c. Create intersection segments (entry -> exit pairs)
             let mut intersection_incoming: Vec<Id<Segment>> = Vec::new();
             let mut intersection_outgoing: Vec<Id<Segment>> = Vec::new();
+            let mut entry_directions: HashMap<Id<Segment>, Vec3> = HashMap::new();
 
             for (entry_idx, entry) in data.entries.iter().enumerate() {
                 for (exit_idx, exit) in data.exits.iter().enumerate() {
@@ -322,6 +323,7 @@ impl Road {
                         turn_type,
                         length,
                     });
+                    entry_directions.insert(segment_id, entry.direction);
 
                     // Wire up connections
                     self.nodes.get_mut(&entry_node_id).outgoing.push(segment_id);
@@ -342,6 +344,7 @@ impl Road {
                 outgoing: intersection_outgoing,
                 edge_nodes: all_edge_nodes,
                 conflicts: HashMap::new(),
+                entry_directions,
                 yield_resolver: self
                     .nodes
                     .get(&data.node_id)
@@ -505,7 +508,7 @@ impl Road {
             crate::log!("  {:?}: {:?} -> {:?}", id, seg.from, seg.to);
         }
 
-        for (id, intersection) in self.intersections.iter_with_ids() {
+        for intersection in self.intersections.iter() {
             crate::log!("Conflicts: {:?}", intersection.conflicts);
         }
     }
@@ -561,10 +564,8 @@ impl SegmentGeometry {
                     if angle_diff > 0.0 {
                         angle_diff -= std::f32::consts::TAU;
                     }
-                } else {
-                    if angle_diff < 0.0 {
-                        angle_diff += std::f32::consts::TAU;
-                    }
+                } else if angle_diff < 0.0 {
+                    angle_diff += std::f32::consts::TAU;
                 }
 
                 radius * angle_diff.abs()
@@ -652,6 +653,7 @@ pub struct Intersection {
     pub edge_nodes: Vec<Id<Node>>,
     pub conflicts: HashMap<Id<Segment>, Vec<Id<Segment>>>,
     pub yield_resolver: YieldResolver,
+    pub entry_directions: HashMap<Id<Segment>, Vec3>,
 }
 
 fn do_segments_conflict(
