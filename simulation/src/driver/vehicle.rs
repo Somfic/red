@@ -1,5 +1,5 @@
 use crate::{
-    driver::{next_segment_toward, GapAcceptance, Idm, SegmentOccupancy},
+    driver::{next_segment_toward, Blinker, GapAcceptance, Idm, SegmentOccupancy},
     Id, Node, Road, Segment,
 };
 use bevy_ecs::prelude::*;
@@ -9,14 +9,6 @@ use rand::seq::{IndexedRandom, IteratorRandom};
 /// Typical car dimensions in meters
 pub const DEFAULT_CAR_LENGTH: f32 = 4.5;
 pub const DEFAULT_CAR_WIDTH: f32 = 1.8;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Blinker {
-    #[default]
-    None,
-    Left,
-    Right,
-}
 
 #[derive(Component)]
 pub struct Vehicle {
