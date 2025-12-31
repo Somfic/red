@@ -114,6 +114,9 @@ pub fn apply_idm(
                 .idm
                 .acceleration(segment.speed_limit, vehicle.speed, gap, delta_speed);
 
+        // Brake lights on when decelerating significantly
+        vehicle.braking = acceleration < -0.5;
+
         vehicle.speed = (vehicle.speed + acceleration * time.delta_secs()).max(0.0);
     }
 }

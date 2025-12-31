@@ -17,6 +17,10 @@ bevy = { version = "0.17.3", default-features = false, features = [
     "bevy_winit",
     "webgl2",
     "web",
+    # Required for tonemapping (prevents purple/magenta colors)
+    "tonemapping_luts",
+    "ktx2",
+    "zstd_rust",
 ] }
 wasm-bindgen = "=0.2.105"
 console_error_panic_hook = "0.1"

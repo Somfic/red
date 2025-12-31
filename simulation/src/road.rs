@@ -264,7 +264,7 @@ impl Road {
                     let cross = entry.direction.cross(exit.direction);
 
                     // Determine geometry: straight-through or turn
-                    let geometry = if dot > 0.9 {
+                    let geometry = if dot > 0.95 {
                         // Straight through
                         SegmentGeometry::Straight
                     } else {
