@@ -1,10 +1,6 @@
 use bevy::prelude::*;
 use simulation::{
-<<<<<<< Updated upstream
-    driver::{PlayerControlled, Vehicle},
-=======
     driver::{Blinker, PlayerControlled, Vehicle, YieldResolver},
->>>>>>> Stashed changes
     Road, SegmentGeometry, SimulationPlugin,
 };
 use wasm_bindgen::prelude::*;
@@ -53,14 +49,6 @@ pub fn test_intersection(mut commands: Commands) {
     let west = road.add_edge_node(Vec3::new(-100.0, 100.0, 0.0));
     let center = road.add_node(Vec3::ZERO);
 
-<<<<<<< Updated upstream
-    // Create segments (incoming/outgoing wired automatically)
-    road.add_bidirectional(north, center, 5.0);
-    road.add_bidirectional(south, center, 5.0);
-    road.add_bidirectional(east, center, 5.0);
-    road.add_bidirectional(west, center, 5.0);
-    // road.add_bidirectional(south_east, center, 5.0);
-=======
     // Create intersection nodes (2x2 grid)
     let int_nw = road.add_intersection_node(
         Vec3::new(-spacing / 2.0, spacing / 2.0, 0.0),
@@ -106,7 +94,6 @@ pub fn test_intersection(mut commands: Commands) {
     road.add_bidirectional(edge_w2, int_sw, 13.9);
     road.add_bidirectional(edge_e1, int_ne, 13.9);
     road.add_bidirectional(edge_e2, int_se, 13.9);
->>>>>>> Stashed changes
 
     // Generate intersection edge nodes and turn segments
     road.finalize();
