@@ -100,9 +100,9 @@ pub fn apply_gap_acceptance(
                         break;
                     }
 
-                    if other_speed < 0.5 {
-                        continue; // skip slow/stopped vehicles for approach detection
-                    }
+                    // if other_speed < 0.5 {
+                    //     continue; // skip slow/stopped vehicles for approach detection
+                    // }
 
                     // Check vehicles approaching conflicting segments
                     if let Some(other_next_seg) = other_next {

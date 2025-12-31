@@ -15,7 +15,10 @@ use std::collections::HashMap;
 use bevy_ecs::prelude::*;
 use glam::Vec3;
 
-use crate::{Arena, Id};
+use crate::{
+    driver::{TurnType, YieldResolver},
+    Arena, Id,
+};
 
 /// Speed limit constants in m/s
 pub mod speed {
@@ -44,6 +47,22 @@ impl Road {
             outgoing: vec![],
             is_spawn: false,
             is_despawn: false,
+            yield_resolver: None,
+        })
+    }
+
+    pub fn add_intersection_node(
+        &mut self,
+        position: Vec3,
+        yield_resolver: YieldResolver,
+    ) -> Id<Node> {
+        self.nodes.alloc(Node {
+            position,
+            incoming: vec![],
+            outgoing: vec![],
+            is_spawn: false,
+            is_despawn: false,
+            yield_resolver: Some(yield_resolver),
         })
     }
 
@@ -54,6 +73,7 @@ impl Road {
             outgoing: vec![],
             is_spawn: true,
             is_despawn: false,
+            yield_resolver: None,
         })
     }
 
@@ -64,6 +84,7 @@ impl Road {
             outgoing: vec![],
             is_spawn: false,
             is_despawn: true,
+            yield_resolver: None,
         })
     }
 
@@ -74,6 +95,7 @@ impl Road {
             outgoing: vec![],
             is_spawn: true,
             is_despawn: true,
+            yield_resolver: None,
         })
     }
 
@@ -90,6 +112,7 @@ impl Road {
             speed_limit,
             geometry,
             length,
+            turn_type: TurnType::Straight,
         });
 
         // Wire up the connections
@@ -238,13 +261,14 @@ impl Road {
                         continue; // Skip U-turns
                     }
 
+                    let cross = entry.direction.cross(exit.direction);
+
                     // Determine geometry: straight-through or turn
                     let geometry = if dot > 0.9 {
                         // Straight through
                         SegmentGeometry::Straight
                     } else {
                         // Turn - calculate arc
-                        let cross = entry.direction.cross(exit.direction);
                         let clockwise = cross.z < 0.0; // cross.z < 0 = right turn (CW)
 
                         // Arc center is where perpendiculars from entry and exit intersect
@@ -282,11 +306,20 @@ impl Road {
                     let exit_pos = self.nodes.get(&exit_node_id).position;
                     let length = geometry.length(entry_pos, exit_pos);
 
+                    let turn_type = if dot > 0.95 {
+                        TurnType::Straight
+                    } else if cross.z < 0.0 {
+                        TurnType::Right(cross.z.abs())
+                    } else {
+                        TurnType::Left(cross.z)
+                    };
+
                     let segment_id = self.segments.alloc(Segment {
                         from: entry_node_id,
                         to: exit_node_id,
                         speed_limit: speed::SLOW, // intersection speed limit
                         geometry,
+                        turn_type,
                         length,
                     });
 
@@ -309,6 +342,11 @@ impl Road {
                 outgoing: intersection_outgoing,
                 edge_nodes: all_edge_nodes,
                 conflicts: HashMap::new(),
+                yield_resolver: self
+                    .nodes
+                    .get(&data.node_id)
+                    .yield_resolver
+                    .unwrap_or_default(),
             });
 
             // Clear the original intersection node's connections (it's no longer used for routing)
@@ -375,6 +413,7 @@ impl Road {
                     outgoing: vec![],
                     is_spawn: from_is_spawn,
                     is_despawn: false,
+                    yield_resolver: None,
                 });
                 // Clear old node's connections and flags (no longer used for routing)
                 let old_node_mut = self.nodes.get_mut(&old_from);
@@ -394,6 +433,7 @@ impl Road {
                     outgoing: vec![],
                     is_spawn: false,
                     is_despawn: to_is_despawn,
+                    yield_resolver: None,
                 });
                 // Clear old node's connections and flags (no longer used for routing)
                 let old_node_mut = self.nodes.get_mut(&old_to);
@@ -477,6 +517,7 @@ pub struct Node {
     pub outgoing: Vec<Id<Segment>>,
     pub is_spawn: bool,
     pub is_despawn: bool,
+    pub yield_resolver: Option<YieldResolver>,
 }
 
 pub struct Segment {
@@ -484,6 +525,7 @@ pub struct Segment {
     pub to: Id<Node>,
     pub speed_limit: f32,
     pub geometry: SegmentGeometry,
+    pub turn_type: TurnType,
     pub length: f32,
 }
 
@@ -609,6 +651,7 @@ pub struct Intersection {
     pub outgoing: Vec<Id<Segment>>,
     pub edge_nodes: Vec<Id<Node>>,
     pub conflicts: HashMap<Id<Segment>, Vec<Id<Segment>>>,
+    pub yield_resolver: YieldResolver,
 }
 
 fn do_segments_conflict(

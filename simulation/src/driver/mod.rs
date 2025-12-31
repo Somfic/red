@@ -12,3 +12,6 @@ pub use pathfinding::*;
 
 mod gap;
 pub use gap::*;
+
+mod yielding;
+pub use yielding::*;

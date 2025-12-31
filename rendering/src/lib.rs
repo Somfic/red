@@ -1,6 +1,10 @@
 use bevy::prelude::*;
 use simulation::{
+<<<<<<< Updated upstream
     driver::{PlayerControlled, Vehicle},
+=======
+    driver::{Blinker, PlayerControlled, Vehicle, YieldResolver},
+>>>>>>> Stashed changes
     Road, SegmentGeometry, SimulationPlugin,
 };
 use wasm_bindgen::prelude::*;
@@ -49,12 +53,60 @@ pub fn test_intersection(mut commands: Commands) {
     let west = road.add_edge_node(Vec3::new(-100.0, 100.0, 0.0));
     let center = road.add_node(Vec3::ZERO);
 
+<<<<<<< Updated upstream
     // Create segments (incoming/outgoing wired automatically)
     road.add_bidirectional(north, center, 5.0);
     road.add_bidirectional(south, center, 5.0);
     road.add_bidirectional(east, center, 5.0);
     road.add_bidirectional(west, center, 5.0);
     // road.add_bidirectional(south_east, center, 5.0);
+=======
+    // Create intersection nodes (2x2 grid)
+    let int_nw = road.add_intersection_node(
+        Vec3::new(-spacing / 2.0, spacing / 2.0, 0.0),
+        YieldResolver::RightOfWay,
+    );
+    let int_ne = road.add_intersection_node(
+        Vec3::new(spacing / 2.0, spacing / 2.0, 0.0),
+        YieldResolver::RightOfWay,
+    );
+    let int_sw = road.add_intersection_node(
+        Vec3::new(-spacing / 2.0, -spacing / 2.0, 0.0),
+        YieldResolver::RightOfWay,
+    );
+    let int_se = road.add_intersection_node(
+        Vec3::new(spacing / 2.0, -spacing / 2.0, 0.0),
+        YieldResolver::RightOfWay,
+    );
+
+    // Create edge nodes (entry/exit points)
+    let edge_n1 = road.add_edge_node(Vec3::new(-spacing / 2.0, spacing * 1.5, 0.0));
+    let edge_n2 = road.add_edge_node(Vec3::new(spacing / 2.0, spacing * 1.5, 0.0));
+    let edge_s1 = road.add_edge_node(Vec3::new(-spacing / 2.0, -spacing * 1.5, 0.0));
+    let edge_s2 = road.add_edge_node(Vec3::new(spacing / 2.0, -spacing * 1.5, 0.0));
+    let edge_w1 = road.add_edge_node(Vec3::new(-spacing * 1.5, spacing / 2.0, 0.0));
+    let edge_w2 = road.add_edge_node(Vec3::new(-spacing * 1.5, -spacing / 2.0, 0.0));
+    let edge_e1 = road.add_edge_node(Vec3::new(spacing * 1.5, spacing / 2.0, 0.0));
+    let edge_e2 = road.add_edge_node(Vec3::new(spacing * 1.5, -spacing / 2.0, 0.0));
+
+    // Connect intersections horizontally
+    road.add_bidirectional(int_nw, int_ne, 13.9);
+    road.add_bidirectional(int_sw, int_se, 13.9);
+
+    // Connect intersections vertically
+    road.add_bidirectional(int_nw, int_sw, 13.9);
+    road.add_bidirectional(int_ne, int_se, 13.9);
+
+    // Connect to edge nodes (entry/exit roads)
+    road.add_bidirectional(edge_n1, int_nw, 13.9);
+    road.add_bidirectional(edge_n2, int_ne, 13.9);
+    road.add_bidirectional(edge_s1, int_sw, 13.9);
+    road.add_bidirectional(edge_s2, int_se, 13.9);
+    road.add_bidirectional(edge_w1, int_nw, 13.9);
+    road.add_bidirectional(edge_w2, int_sw, 13.9);
+    road.add_bidirectional(edge_e1, int_ne, 13.9);
+    road.add_bidirectional(edge_e2, int_se, 13.9);
+>>>>>>> Stashed changes
 
     // Generate intersection edge nodes and turn segments
     road.finalize();

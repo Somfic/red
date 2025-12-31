@@ -43,6 +43,42 @@ impl Vehicle {
     }
 }
 
+<<<<<<< Updated upstream
+=======
+/// Update blinker state based on upcoming turn direction
+pub fn update_blinkers(mut vehicles: Query<&mut Vehicle>, road: Res<Road>) {
+    for mut vehicle in &mut vehicles {
+        let current_seg = road.segments.get(&vehicle.segment);
+
+        // if going straight and not enough progress, turn off blinkers
+        if current_seg.turn_type.cross().abs() < 0.3 && vehicle.progress < 0.5 {
+            vehicle.blinker = Blinker::None;
+            continue;
+        }
+
+        let current_seg_blinker = current_seg.turn_type.blinker();
+        if current_seg_blinker != Blinker::None {
+            vehicle.blinker = current_seg_blinker;
+            continue;
+        }
+
+        if vehicle.progress < 0.5 {
+            vehicle.blinker = Blinker::None;
+            continue;
+        }
+
+        let Some(&next_seg_id) = vehicle.route.get(1) else {
+            vehicle.blinker = Blinker::None;
+            continue;
+        };
+        let next_seg = road.segments.get(&next_seg_id);
+
+        let next_seg_blinker = next_seg.turn_type.blinker();
+        vehicle.blinker = next_seg_blinker;
+    }
+}
+
+>>>>>>> Stashed changes
 /// Marker component for the player-controlled vehicle
 #[derive(Component)]
 pub struct PlayerControlled;
