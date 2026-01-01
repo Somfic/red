@@ -10,6 +10,9 @@ pub fn next_segment_toward(
         return None; // arrived
     }
 
+    // Debug: log BFS start
+    // crate::log!("BFS: {:?} -> {:?}", current, destination);
+
     let mut queue = VecDeque::<Id<Node>>::new();
     let mut came_from = HashMap::<Id<Node>, Id<Segment>>::new();
 

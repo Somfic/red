@@ -2,10 +2,11 @@ use glam::Vec3;
 
 use crate::driver::Blinker;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum YieldResolver {
     #[default]
     RightOfWay,
+    Roundabout,
 }
 
 /// Threshold for deadlock detection - if both cars waiting this long, use arrival order
@@ -63,6 +64,18 @@ impl YieldResolver {
 
                 // 3. Deterministic tiebreaker: earlier arrival wins (FIFO)
                 my_arrival_order < their_arrival_order
+            }
+            YieldResolver::Roundabout => {
+                // Simple rule: vehicles in the circle ALWAYS have priority over entering vehicles
+                let i_am_entering = my_turn_type == TurnType::RoundaboutEntry;
+                let they_are_in_circle = their_turn_type == TurnType::RoundaboutCircle;
+
+                if i_am_entering && they_are_in_circle {
+                    return false; // They're in circle, I must yield
+                }
+
+                // If I'm in the circle (or exiting), I have priority
+                true
             }
         }
     }
@@ -370,11 +383,17 @@ mod tests {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TurnType {
     Straight,
     Right(f32),
     Left(f32),
+    /// Roundabout circle segment - flows with traffic, no conflicts with other circle segments
+    RoundaboutCircle,
+    /// Roundabout entry segment - must yield to circle traffic
+    RoundaboutEntry,
+    /// Roundabout exit segment - diverging, no conflicts
+    RoundaboutExit,
 }
 
 impl TurnType {
@@ -383,12 +402,15 @@ impl TurnType {
             TurnType::Straight => 0.0,
             TurnType::Right(cross) => *cross,
             TurnType::Left(cross) => *cross,
+            TurnType::RoundaboutCircle => 0.0,
+            TurnType::RoundaboutEntry => -0.7,
+            TurnType::RoundaboutExit => -0.5,
         }
     }
 
     pub fn blinker(&self) -> Blinker {
         match self {
-            TurnType::Straight => Blinker::None,
+            TurnType::Straight | TurnType::RoundaboutCircle => Blinker::None,
             TurnType::Right(cross) => {
                 if cross.abs() > 0.3 {
                     Blinker::Right
@@ -403,6 +425,7 @@ impl TurnType {
                     Blinker::None
                 }
             }
+            TurnType::RoundaboutEntry | TurnType::RoundaboutExit => Blinker::Right,
         }
     }
 }

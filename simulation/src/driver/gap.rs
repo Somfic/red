@@ -8,7 +8,10 @@
 use bevy_ecs::prelude::*;
 use bevy_time::Time;
 
-use crate::{driver::Vehicle, Road};
+use crate::{
+    driver::{TurnType, Vehicle},
+    Road,
+};
 
 /// Minimum physical distance (meters) to approaching vehicle before yielding
 const MIN_SAFE_DISTANCE: f32 = 3.0;
@@ -125,9 +128,25 @@ pub fn apply_gap_acceptance(
                     }
 
                     // Safety check 1: Yield to vehicles already IN the intersection on conflicting segments
+                    // For roundabouts: circle traffic has priority over entry traffic, even if entry is already in
                     if conflicts.contains(&other_seg) {
-                        actual_gap = 0.0;
-                        break;
+                        let my_turn = road.segments.get(next_segment).turn_type;
+                        let other_turn = road.segments.get(&other_seg).turn_type;
+
+                        // For roundabouts: circle traffic doesn't yield to entry traffic
+                        let dominated = match intersection.yield_resolver {
+                            crate::driver::YieldResolver::Roundabout => {
+                                // Only yield if I'm entering and they're in the circle
+                                my_turn == TurnType::RoundaboutEntry
+                                    && other_turn == TurnType::RoundaboutCircle
+                            }
+                            _ => true, // For regular intersections, always yield to vehicles already in
+                        };
+
+                        if dominated {
+                            actual_gap = 0.0;
+                            break;
+                        }
                     }
 
                     // Check vehicles approaching conflicting segments

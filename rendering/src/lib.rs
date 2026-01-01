@@ -135,54 +135,22 @@ fn setup(
 pub fn test_intersection(mut commands: Commands) {
     let mut road = Road::default();
 
-    // Grid of intersections
     let spacing = 80.0;
 
-    // Create intersection nodes (2x2 grid)
-    let int_nw = road.add_intersection_node(
-        Vec3::new(-spacing / 2.0, spacing / 2.0, 0.0),
-        YieldResolver::RightOfWay,
-    );
-    let int_ne = road.add_intersection_node(
-        Vec3::new(spacing / 2.0, spacing / 2.0, 0.0),
-        YieldResolver::RightOfWay,
-    );
-    let int_sw = road.add_intersection_node(
-        Vec3::new(-spacing / 2.0, -spacing / 2.0, 0.0),
-        YieldResolver::RightOfWay,
-    );
-    let int_se = road.add_intersection_node(
-        Vec3::new(spacing / 2.0, -spacing / 2.0, 0.0),
-        YieldResolver::RightOfWay,
-    );
+    // Roundabout in the center
+    let roundabout = road.add_intersection_node(Vec3::new(0.0, 0.0, 0.0), YieldResolver::Roundabout);
 
-    // Create edge nodes (entry/exit points)
-    let edge_n1 = road.add_edge_node(Vec3::new(-spacing / 2.0, spacing * 1.5, 0.0));
-    let edge_n2 = road.add_edge_node(Vec3::new(spacing / 2.0, spacing * 1.5, 0.0));
-    let edge_s1 = road.add_edge_node(Vec3::new(-spacing / 2.0, -spacing * 1.5, 0.0));
-    let edge_s2 = road.add_edge_node(Vec3::new(spacing / 2.0, -spacing * 1.5, 0.0));
-    let edge_w1 = road.add_edge_node(Vec3::new(-spacing * 1.5, spacing / 2.0, 0.0));
-    let edge_w2 = road.add_edge_node(Vec3::new(-spacing * 1.5, -spacing / 2.0, 0.0));
-    let edge_e1 = road.add_edge_node(Vec3::new(spacing * 1.5, spacing / 2.0, 0.0));
-    let edge_e2 = road.add_edge_node(Vec3::new(spacing * 1.5, -spacing / 2.0, 0.0));
+    // Edge nodes around the roundabout
+    let edge_n = road.add_edge_node(Vec3::new(0.0, spacing, 0.0));
+    let edge_s = road.add_edge_node(Vec3::new(0.0, -spacing, 0.0));
+    let edge_e = road.add_edge_node(Vec3::new(spacing, 0.0, 0.0));
+    let edge_w = road.add_edge_node(Vec3::new(-spacing, 0.0, 0.0));
 
-    // Connect intersections horizontally
-    road.add_bidirectional(int_nw, int_ne, 13.9);
-    road.add_bidirectional(int_sw, int_se, 13.9);
-
-    // Connect intersections vertically
-    road.add_bidirectional(int_nw, int_sw, 13.9);
-    road.add_bidirectional(int_ne, int_se, 13.9);
-
-    // Connect to edge nodes (entry/exit roads)
-    road.add_bidirectional(edge_n1, int_nw, 13.9);
-    road.add_bidirectional(edge_n2, int_ne, 13.9);
-    road.add_bidirectional(edge_s1, int_sw, 13.9);
-    road.add_bidirectional(edge_s2, int_se, 13.9);
-    road.add_bidirectional(edge_w1, int_nw, 13.9);
-    road.add_bidirectional(edge_w2, int_sw, 13.9);
-    road.add_bidirectional(edge_e1, int_ne, 13.9);
-    road.add_bidirectional(edge_e2, int_se, 13.9);
+    // Connect roundabout to edge nodes
+    road.add_bidirectional(edge_n, roundabout, 13.9);
+    road.add_bidirectional(edge_s, roundabout, 13.9);
+    road.add_bidirectional(edge_e, roundabout, 13.9);
+    road.add_bidirectional(edge_w, roundabout, 13.9);
 
     // Generate intersection edge nodes and turn segments
     road.finalize();
@@ -660,6 +628,28 @@ fn log_vehicle_debug(
         output.push_str(" -> (no next segment)\n");
     }
 
+    // Log full route with segment details
+    output.push_str(&format!("Destination: {:?}\n", vehicle.destination));
+    output.push_str(&format!("\nRoute ({} segments):\n", vehicle.route.len()));
+    for (i, seg_id) in vehicle.route.iter().enumerate() {
+        let seg = road.segments.get(seg_id);
+        let from_pos = road.nodes.get(&seg.from).position;
+        let to_pos = road.nodes.get(&seg.to).position;
+        let marker = if i == 0 { " <-- current" } else { "" };
+        output.push_str(&format!(
+            "  [{}] {:?}: {:?} ({:.0},{:.0}) -> ({:.0},{:.0}), len={:.1}m{}\n",
+            i,
+            seg_id,
+            seg.turn_type,
+            from_pos.x,
+            from_pos.y,
+            to_pos.x,
+            to_pos.y,
+            seg.length,
+            marker
+        ));
+    }
+
     output.push_str("\nGap Acceptance:\n");
     output.push_str(&format!(
         "  arrival_order: {:?}\n",
@@ -763,6 +753,42 @@ fn draw_selected_vehicle_debug(
             yellow,
         );
     }
+
+    // Draw the planned route
+    let route_z = Vec3::Z * 1.5;
+    for (i, seg_id) in vehicle.route.iter().enumerate() {
+        let seg = road.segments.get(seg_id);
+        let from_pos = road.nodes.get(&seg.from).position;
+        let to_pos = road.nodes.get(&seg.to).position;
+
+        // Color: bright cyan for current, fading to dimmer for future segments
+        let brightness = 1.0 - (i as f32 * 0.15).min(0.7);
+        let color = Color::linear_rgb(0.0, brightness, brightness);
+
+        // Draw the segment path
+        let steps = match seg.geometry {
+            SegmentGeometry::Straight => 1,
+            SegmentGeometry::Curved { .. } => 12,
+        };
+
+        for j in 0..steps {
+            let t0 = j as f32 / steps as f32;
+            let t1 = (j + 1) as f32 / steps as f32;
+            let p0 = seg.geometry.position_at(from_pos, to_pos, t0) + route_z;
+            let p1 = seg.geometry.position_at(from_pos, to_pos, t1) + route_z;
+            gizmos.line(p0, p1, color);
+        }
+
+        // Draw segment index number at midpoint
+        let mid = seg.geometry.position_at(from_pos, to_pos, 0.5) + route_z;
+        gizmos.circle(mid, 1.0, color);
+    }
+
+    // Draw destination marker
+    let dest_pos = road.nodes.get(&vehicle.destination).position + Vec3::Z * 2.0;
+    let green = Color::linear_rgb(0.0, 1.0, 0.0);
+    gizmos.circle(dest_pos, 3.0, green);
+    gizmos.circle(dest_pos, 2.0, green);
 
     // Draw conflict lines if approaching intersection
     if vehicle.progress > 0.5 {
