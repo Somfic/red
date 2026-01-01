@@ -1,12 +1,21 @@
 use bevy::{
     light::{DirectionalLightShadowMap, PointLightShadowMap},
     prelude::*,
+    window::PrimaryWindow,
 };
 use simulation::{
     driver::{Blinker, PlayerControlled, Vehicle, YieldResolver},
-    Road, SegmentGeometry, SimulationPlugin,
+    Id, Road, Segment, SegmentGeometry, SimulationPlugin,
 };
 use wasm_bindgen::prelude::*;
+
+/// Resource tracking which vehicle is currently selected for debug inspection
+#[derive(Resource, Default)]
+struct SelectedVehicle(Option<Entity>);
+
+/// Resource tracking which segment is currently selected for debug inspection
+#[derive(Resource, Default)]
+struct SelectedSegment(Option<Id<Segment>>);
 
 /// Road width in meters (single lane)
 const LANE_WIDTH: f32 = 3.5;
@@ -39,6 +48,8 @@ pub fn start() {
             ..default()
         }))
         .add_plugins(SimulationPlugin)
+        .init_resource::<SelectedVehicle>()
+        .init_resource::<SelectedSegment>()
         .add_systems(Startup, (setup, test_intersection))
         .add_systems(Startup, spawn_road_meshes.after(test_intersection))
         .add_systems(
@@ -49,6 +60,9 @@ pub fn start() {
                 update_vehicle_transforms,
                 draw_vehicle_lights,
                 player_input,
+                handle_selection,
+                draw_selected_vehicle_debug,
+                draw_selected_segment_debug,
             ),
         )
         .run();
@@ -508,4 +522,390 @@ fn player_input(
     }
 
     vehicle.speed = vehicle.speed.clamp(0.0, 10.0);
+}
+
+/// Handle mouse clicks to select vehicles or segments for debug inspection
+fn handle_selection(
+    mouse: Res<ButtonInput<MouseButton>>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<(&Camera, &GlobalTransform)>,
+    vehicles: Query<(Entity, &Vehicle, &Transform), With<VehicleRender>>,
+    all_vehicles: Query<(Entity, &Vehicle)>,
+    mut selected_vehicle: ResMut<SelectedVehicle>,
+    mut selected_segment: ResMut<SelectedSegment>,
+    road: Res<Road>,
+) {
+    if !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+
+    let Ok(window) = window.single() else { return };
+    let Ok((camera, cam_transform)) = camera.single() else {
+        return;
+    };
+
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+
+    // Convert cursor position to world coordinates
+    // For orthographic camera, we can use viewport_to_world and get the XY intersection with Z=0
+    let Ok(ray) = camera.viewport_to_world(cam_transform, cursor_pos) else {
+        return;
+    };
+
+    // Find where ray intersects Z=0 plane
+    let t = -ray.origin.z / ray.direction.z;
+    let world_pos = ray.origin + ray.direction * t;
+
+    // Find nearest vehicle to click position (using XY distance)
+    let mut nearest_vehicle: Option<(Entity, f32)> = None;
+    for (entity, _vehicle, transform) in &vehicles {
+        let vehicle_pos = transform.translation;
+        let dist =
+            ((world_pos.x - vehicle_pos.x).powi(2) + (world_pos.y - vehicle_pos.y).powi(2)).sqrt();
+
+        // Check if within selection radius (roughly vehicle size)
+        if dist < 5.0 {
+            if nearest_vehicle.is_none() || dist < nearest_vehicle.unwrap().1 {
+                nearest_vehicle = Some((entity, dist));
+            }
+        }
+    }
+
+    if let Some((entity, _)) = nearest_vehicle {
+        selected_vehicle.0 = Some(entity);
+        selected_segment.0 = None;
+
+        // Log debug info to console
+        if let Ok((_, vehicle)) = all_vehicles.get(entity) {
+            log_vehicle_debug(entity, vehicle, &all_vehicles, &road);
+        }
+        return;
+    }
+
+    // No vehicle clicked - check for segment
+    let mut nearest_segment: Option<(Id<Segment>, f32)> = None;
+    for (seg_id, segment) in road.segments.iter_with_ids() {
+        let from = road.nodes.get(&segment.from).position;
+        let to = road.nodes.get(&segment.to).position;
+
+        // Sample points along the segment to find distance
+        let steps = match segment.geometry {
+            SegmentGeometry::Straight => 4,
+            SegmentGeometry::Curved { .. } => 16,
+        };
+
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let pos = segment.geometry.position_at(from, to, t);
+            let dist = ((world_pos.x - pos.x).powi(2) + (world_pos.y - pos.y).powi(2)).sqrt();
+
+            if dist < LANE_WIDTH {
+                if nearest_segment.is_none() || dist < nearest_segment.unwrap().1 {
+                    nearest_segment = Some((seg_id, dist));
+                }
+            }
+        }
+    }
+
+    if let Some((seg_id, _)) = nearest_segment {
+        selected_segment.0 = Some(seg_id);
+        selected_vehicle.0 = None;
+
+        // Log segment info
+        let segment = road.segments.get(&seg_id);
+        let mut output = format!("\n=== Segment Debug ===\nSegment: {:?}\n", seg_id);
+        output.push_str(&format!(
+            "From: {:?} -> To: {:?}\n",
+            segment.from, segment.to
+        ));
+        output.push_str(&format!("Length: {:.1}m\n", segment.length));
+
+        // Find conflicts
+        for intersection in road.intersections.iter() {
+            if intersection.incoming.contains(&seg_id) {
+                if let Some(conflicts) = intersection.conflicts.get(&seg_id) {
+                    output.push_str(&format!("\nConflicting segments: {:?}\n", conflicts));
+                }
+                break;
+            }
+        }
+
+        web_sys::console::log_1(&output.into());
+    } else {
+        selected_vehicle.0 = None;
+        selected_segment.0 = None;
+    }
+}
+
+/// Log vehicle debug info to browser console
+fn log_vehicle_debug(
+    entity: Entity,
+    vehicle: &Vehicle,
+    all_vehicles: &Query<(Entity, &Vehicle)>,
+    road: &Road,
+) {
+    let mut output = String::new();
+
+    output.push_str("\n=== Vehicle Debug ===\n");
+    output.push_str(&format!("Entity: {:?}\n", entity));
+    output.push_str(&format!("Speed: {:.2} m/s\n", vehicle.speed));
+    output.push_str(&format!("Progress: {:.2}\n", vehicle.progress));
+    output.push_str(&format!("Segment: {:?}", vehicle.segment));
+
+    if let Some(next_seg) = vehicle.route.get(1) {
+        output.push_str(&format!(" -> Next: {:?}\n", next_seg));
+    } else {
+        output.push_str(" -> (no next segment)\n");
+    }
+
+    output.push_str("\nGap Acceptance:\n");
+    output.push_str(&format!(
+        "  arrival_order: {:?}\n",
+        vehicle.gap.arrival_order
+    ));
+    output.push_str(&format!("  waiting_time: {:?}\n", vehicle.gap.waiting_time));
+    output.push_str(&format!("  cleared_to_go: {}\n", vehicle.gap.cleared_to_go));
+    output.push_str(&format!("  min_gap: {:.2}s\n", vehicle.gap.min_gap));
+
+    // Find conflicts if approaching intersection
+    if vehicle.progress > 0.5 {
+        if let Some(next_seg) = vehicle.route.get(1) {
+            for intersection in road.intersections.iter() {
+                if intersection.incoming.contains(next_seg) {
+                    if let Some(conflicts) = intersection.conflicts.get(next_seg) {
+                        output.push_str("\nConflicts:\n");
+
+                        let my_arrival = vehicle.gap.arrival_order.unwrap_or(u32::MAX);
+                        let my_waiting = vehicle.gap.waiting_time.unwrap_or(0.0);
+
+                        for (other_entity, other_vehicle) in all_vehicles.iter() {
+                            if other_entity == entity {
+                                continue;
+                            }
+
+                            // Check if other vehicle is on or approaching a conflicting segment
+                            let on_conflict = conflicts.contains(&other_vehicle.segment);
+                            let approaching_conflict = other_vehicle
+                                .route
+                                .get(1)
+                                .map(|s| conflicts.contains(s))
+                                .unwrap_or(false);
+
+                            if on_conflict || approaching_conflict {
+                                let their_arrival =
+                                    other_vehicle.gap.arrival_order.unwrap_or(u32::MAX);
+                                let their_waiting = other_vehicle.gap.waiting_time.unwrap_or(0.0);
+
+                                let priority_status = if on_conflict {
+                                    "IN INTERSECTION - must wait"
+                                } else if my_arrival < their_arrival {
+                                    "I have priority (arrived first)"
+                                } else if my_arrival > their_arrival {
+                                    "THEY have priority (arrived first)"
+                                } else {
+                                    "Same arrival order??"
+                                };
+
+                                output.push_str(&format!(
+                                    "  - {:?}: arrival={:?}, waiting={:.2}s, {}\n",
+                                    other_entity, their_arrival, their_waiting, priority_status
+                                ));
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    web_sys::console::log_1(&output.into());
+}
+
+/// Draw debug visualization for selected vehicle
+fn draw_selected_vehicle_debug(
+    mut gizmos: Gizmos,
+    selected: Res<SelectedVehicle>,
+    vehicles: Query<(Entity, &Vehicle, &Transform)>,
+    road: Res<Road>,
+) {
+    let Some(selected_entity) = selected.0 else {
+        return;
+    };
+
+    let Ok((_, vehicle, transform)) = vehicles.get(selected_entity) else {
+        return;
+    };
+
+    let position = transform.translation;
+
+    // Draw yellow selection highlight box
+    let half_len = vehicle.length / 2.0 + 0.5;
+    let half_wid = vehicle.width / 2.0 + 0.5;
+    let angle = transform.rotation.to_euler(EulerRot::ZYX).0;
+    let dir = Vec3::new(angle.cos(), angle.sin(), 0.0);
+    let perp = Vec3::new(-dir.y, dir.x, 0.0);
+
+    let corners = [
+        position + dir * half_len + perp * half_wid,
+        position + dir * half_len - perp * half_wid,
+        position - dir * half_len - perp * half_wid,
+        position - dir * half_len + perp * half_wid,
+    ];
+
+    let yellow = Color::linear_rgb(1.0, 1.0, 0.0);
+    for i in 0..4 {
+        gizmos.line(
+            corners[i] + Vec3::Z * 2.0,
+            corners[(i + 1) % 4] + Vec3::Z * 2.0,
+            yellow,
+        );
+    }
+
+    // Draw conflict lines if approaching intersection
+    if vehicle.progress > 0.5 {
+        if let Some(next_seg) = vehicle.route.get(1) {
+            for intersection in road.intersections.iter() {
+                if intersection.incoming.contains(next_seg) {
+                    if let Some(conflicts) = intersection.conflicts.get(next_seg) {
+                        let my_arrival = vehicle.gap.arrival_order.unwrap_or(u32::MAX);
+
+                        for (other_entity, other_vehicle, other_transform) in &vehicles {
+                            if other_entity == selected_entity {
+                                continue;
+                            }
+
+                            // Check if other vehicle is on or approaching a conflicting segment
+                            let on_conflict = conflicts.contains(&other_vehicle.segment);
+                            let approaching_conflict = other_vehicle
+                                .route
+                                .get(1)
+                                .map(|s| conflicts.contains(s))
+                                .unwrap_or(false);
+
+                            if on_conflict || approaching_conflict {
+                                let their_arrival =
+                                    other_vehicle.gap.arrival_order.unwrap_or(u32::MAX);
+
+                                // Red = they have priority (I must yield)
+                                // Green = I have priority over them
+                                let color = if on_conflict {
+                                    Color::linear_rgb(1.0, 0.0, 0.0) // Red - in intersection
+                                } else if my_arrival < their_arrival {
+                                    Color::linear_rgb(0.0, 1.0, 0.0) // Green - I win
+                                } else {
+                                    Color::linear_rgb(1.0, 0.0, 0.0) // Red - they win
+                                };
+
+                                let other_pos = other_transform.translation + Vec3::Z * 1.5;
+                                gizmos.line(position + Vec3::Z * 1.5, other_pos, color);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Draw debug visualization for selected segment
+fn draw_selected_segment_debug(
+    mut gizmos: Gizmos,
+    selected: Res<SelectedSegment>,
+    road: Res<Road>,
+) {
+    let Some(selected_seg_id) = selected.0 else {
+        return;
+    };
+
+    let segment = road.segments.get(&selected_seg_id);
+    let from = road.nodes.get(&segment.from).position;
+    let to = road.nodes.get(&segment.to).position;
+
+    // Draw selected segment in yellow
+    draw_segment_gizmo(
+        &mut gizmos,
+        &segment.geometry,
+        from,
+        to,
+        Color::linear_rgb(1.0, 1.0, 0.0),
+    );
+
+    // Find intersection containing this segment
+    for intersection in road.intersections.iter() {
+        if intersection.incoming.contains(&selected_seg_id) {
+            let conflicts = intersection.conflicts.get(&selected_seg_id);
+
+            // Draw all other segments in the intersection
+            for other_seg_id in &intersection.incoming {
+                if *other_seg_id == selected_seg_id {
+                    continue;
+                }
+
+                let other_seg = road.segments.get(other_seg_id);
+                let other_from = road.nodes.get(&other_seg.from).position;
+                let other_to = road.nodes.get(&other_seg.to).position;
+
+                // Red if conflicting, green if not
+                let is_conflict = conflicts.map(|c| c.contains(other_seg_id)).unwrap_or(false);
+                let color = if is_conflict {
+                    Color::linear_rgb(1.0, 0.0, 0.0) // Red - conflicts
+                } else {
+                    Color::linear_rgb(0.0, 1.0, 0.0) // Green - no conflict
+                };
+
+                draw_segment_gizmo(
+                    &mut gizmos,
+                    &other_seg.geometry,
+                    other_from,
+                    other_to,
+                    color,
+                );
+            }
+            break;
+        }
+    }
+}
+
+/// Helper to draw a segment path using gizmos
+fn draw_segment_gizmo(
+    gizmos: &mut Gizmos,
+    geometry: &SegmentGeometry,
+    from: Vec3,
+    to: Vec3,
+    color: Color,
+) {
+    let steps = match geometry {
+        SegmentGeometry::Straight => 1,
+        SegmentGeometry::Curved { .. } => 16,
+    };
+
+    let z_offset = Vec3::Z * 0.5;
+    let half_width = LANE_WIDTH / 2.0;
+
+    for i in 0..steps {
+        let t0 = i as f32 / steps as f32;
+        let t1 = (i + 1) as f32 / steps as f32;
+
+        let c0 = geometry.position_at(from, to, t0);
+        let c1 = geometry.position_at(from, to, t1);
+
+        let tangent = (c1 - c0).normalize_or_zero();
+        let perp = Vec3::new(-tangent.y, tangent.x, 0.0);
+
+        // Draw both edges of the segment
+        let left0 = c0 + perp * half_width + z_offset;
+        let left1 = c1 + perp * half_width + z_offset;
+        let right0 = c0 - perp * half_width + z_offset;
+        let right1 = c1 - perp * half_width + z_offset;
+
+        gizmos.line(left0, left1, color);
+        gizmos.line(right0, right1, color);
+
+        // Draw center line
+        gizmos.line(c0 + z_offset, c1 + z_offset, color);
+    }
 }

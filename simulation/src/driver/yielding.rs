@@ -1,4 +1,3 @@
-use bevy_ecs::entity::Entity;
 use glam::Vec3;
 
 use crate::driver::Blinker;
@@ -9,23 +8,40 @@ pub enum YieldResolver {
     RightOfWay,
 }
 
-/// Threshold for deadlock detection - if both cars waiting this long, break with entity ID
+/// Threshold for deadlock detection - if both cars waiting this long, use arrival order
 const DEADLOCK_THRESHOLD: f32 = 0.5;
 
 impl YieldResolver {
+    /// Determines if the current vehicle has priority over another vehicle.
+    /// Uses arrival_order (FIFO) for deadlock resolution - earlier arrivals get priority.
     pub fn has_priority(
         &self,
         my_turn_type: TurnType,
         my_direction: Vec3,
-        my_entity: Entity,
+        my_arrival_order: u32,
         my_waiting_time: f32,
         their_turn_type: TurnType,
         their_direction: Vec3,
-        their_entity: Entity,
+        their_arrival_order: u32,
         their_waiting_time: f32,
     ) -> bool {
         match self {
             YieldResolver::RightOfWay => {
+                // 0. FIFO queue priority: vehicles in the queue go before those not yet in queue
+                // arrival_order = u32::MAX means vehicle hasn't entered waiting zone yet
+                if their_arrival_order == u32::MAX && my_arrival_order != u32::MAX {
+                    return true; // I'm in queue, they're not - I have priority
+                }
+                if my_arrival_order == u32::MAX && their_arrival_order != u32::MAX {
+                    return false; // They're in queue, I'm not - they have priority
+                }
+
+                // DEADLOCK OVERRIDE: If both vehicles have been waiting a long time,
+                // use pure FIFO (arrival order) to break any circular dependencies
+                if my_waiting_time > DEADLOCK_THRESHOLD && their_waiting_time > DEADLOCK_THRESHOLD {
+                    return my_arrival_order < their_arrival_order;
+                }
+
                 // 1. Yield to right (highest priority rule)
                 // Cross product of heading directions - but we need to know where they're COMING FROM
                 // (approach direction = opposite of heading), so we flip the comparison
@@ -33,14 +49,7 @@ impl YieldResolver {
                 if direction_cross < -0.3 {
                     return true; // they are to our left, we have priority
                 } else if direction_cross > 0.3 {
-                    // They are to our right - normally we yield
-                    // But if we're both stuck waiting, break deadlock with entity ID
-                    if my_waiting_time > DEADLOCK_THRESHOLD
-                        && their_waiting_time > DEADLOCK_THRESHOLD
-                    {
-                        return my_entity < their_entity;
-                    }
-                    return false; // they have priority
+                    return false; // they are to our right, they have priority
                 }
 
                 // 2. Opposing/same direction: shorter turn path wins
@@ -52,8 +61,8 @@ impl YieldResolver {
                     return my_path < their_path;
                 }
 
-                // 3. Deterministic tiebreaker: lower entity ID wins
-                my_entity < their_entity
+                // 3. Deterministic tiebreaker: earlier arrival wins (FIFO)
+                my_arrival_order < their_arrival_order
             }
         }
     }
@@ -69,13 +78,9 @@ mod tests {
     const RIGHT: Vec3 = Vec3::new(1.0, 0.0, 0.0);
     const LEFT: Vec3 = Vec3::new(-1.0, 0.0, 0.0);
 
-    // Dummy entities for testing
-    fn entity_a() -> Entity {
-        Entity::from_bits(1)
-    }
-    fn entity_b() -> Entity {
-        Entity::from_bits(2)
-    }
+    // Arrival orders for testing (lower = arrived first)
+    const FIRST: u32 = 1;
+    const SECOND: u32 = 2;
 
     #[test]
     fn test_yield_to_right_both_straight() {
@@ -86,15 +91,27 @@ mod tests {
         // From north's perspective facing south: east is to my LEFT
         // So north (DOWN) has priority over east (LEFT)
         assert!(resolver.has_priority(
-            TurnType::Straight, DOWN, entity_a(), 0.0,
-            TurnType::Straight, LEFT, entity_b(), 0.0,
+            TurnType::Straight,
+            DOWN,
+            FIRST,
+            0.0,
+            TurnType::Straight,
+            LEFT,
+            SECOND,
+            0.0,
         ));
 
         // From east's perspective facing west: north is to my RIGHT
         // So east (LEFT) yields to north (DOWN)
         assert!(!resolver.has_priority(
-            TurnType::Straight, LEFT, entity_a(), 0.0,
-            TurnType::Straight, DOWN, entity_b(), 0.0,
+            TurnType::Straight,
+            LEFT,
+            FIRST,
+            0.0,
+            TurnType::Straight,
+            DOWN,
+            SECOND,
+            0.0,
         ));
     }
 
@@ -106,8 +123,14 @@ mod tests {
         // North has priority over east (east is to north's left)
         // Even though the east car is turning, north still has priority
         assert!(resolver.has_priority(
-            TurnType::Straight, DOWN, entity_a(), 0.0,
-            TurnType::Right(-0.7), LEFT, entity_b(), 0.0,
+            TurnType::Straight,
+            DOWN,
+            FIRST,
+            0.0,
+            TurnType::Right(-0.7),
+            LEFT,
+            SECOND,
+            0.0,
         ));
     }
 
@@ -119,14 +142,26 @@ mod tests {
         // Right turn has shorter path than straight
         // Car from north (heading DOWN) turning right vs car from south (heading UP) going straight
         assert!(resolver.has_priority(
-            TurnType::Right(-0.7), DOWN, entity_a(), 0.0,
-            TurnType::Straight, UP, entity_b(), 0.0,
+            TurnType::Right(-0.7),
+            DOWN,
+            FIRST,
+            0.0,
+            TurnType::Straight,
+            UP,
+            SECOND,
+            0.0,
         ));
 
         // Reverse: straight loses to right turn
         assert!(!resolver.has_priority(
-            TurnType::Straight, UP, entity_a(), 0.0,
-            TurnType::Right(-0.7), DOWN, entity_b(), 0.0,
+            TurnType::Straight,
+            UP,
+            FIRST,
+            0.0,
+            TurnType::Right(-0.7),
+            DOWN,
+            SECOND,
+            0.0,
         ));
     }
 
@@ -137,48 +172,129 @@ mod tests {
         // Both from opposing directions, one turning right, one turning left
         // Right turn (shorter path) wins
         assert!(resolver.has_priority(
-            TurnType::Right(-0.7), DOWN, entity_a(), 0.0,
-            TurnType::Left(0.7), UP, entity_b(), 0.0,
+            TurnType::Right(-0.7),
+            DOWN,
+            FIRST,
+            0.0,
+            TurnType::Left(0.7),
+            UP,
+            SECOND,
+            0.0,
         ));
 
         assert!(!resolver.has_priority(
-            TurnType::Left(0.7), UP, entity_a(), 0.0,
-            TurnType::Right(-0.7), DOWN, entity_b(), 0.0,
+            TurnType::Left(0.7),
+            UP,
+            FIRST,
+            0.0,
+            TurnType::Right(-0.7),
+            DOWN,
+            SECOND,
+            0.0,
         ));
     }
 
     #[test]
-    fn test_entity_tiebreaker() {
+    fn test_arrival_order_tiebreaker() {
         let resolver = YieldResolver::RightOfWay;
 
-        // Same everything - lower entity ID wins
+        // Same everything - earlier arrival (lower number) wins
         assert!(resolver.has_priority(
-            TurnType::Straight, DOWN, entity_a(), 0.0,
-            TurnType::Straight, DOWN, entity_b(), 0.0,
+            TurnType::Straight,
+            DOWN,
+            FIRST,
+            0.0,
+            TurnType::Straight,
+            DOWN,
+            SECOND,
+            0.0,
         ));
 
         assert!(!resolver.has_priority(
-            TurnType::Straight, DOWN, entity_b(), 0.0,
-            TurnType::Straight, DOWN, entity_a(), 0.0,
+            TurnType::Straight,
+            DOWN,
+            SECOND,
+            0.0,
+            TurnType::Straight,
+            DOWN,
+            FIRST,
+            0.0,
         ));
     }
 
     #[test]
-    fn test_deadlock_breaks_with_entity_id() {
+    fn test_deadlock_breaks_with_arrival_order() {
         let resolver = YieldResolver::RightOfWay;
 
-        // East would normally yield to north (north is to east's right)
-        // But if both have been waiting > 0.5s, entity ID breaks the deadlock
-        // entity_a (1) < entity_b (2), so entity_a wins
+        // When both vehicles have been waiting > 0.5s, pure FIFO (arrival order) wins
+        // regardless of direction or turn type
+        // FIRST arrived before SECOND, so FIRST always wins
         assert!(resolver.has_priority(
-            TurnType::Straight, LEFT, entity_a(), 1.0,  // east, waiting 1s
-            TurnType::Straight, DOWN, entity_b(), 1.0,  // north, waiting 1s
+            TurnType::Straight,
+            LEFT,
+            FIRST,
+            1.0, // east, arrived first, waiting 1s
+            TurnType::Straight,
+            DOWN,
+            SECOND,
+            1.0, // north, arrived second, waiting 1s
         ));
 
-        // With entity_b checking against entity_a, entity_b loses
+        // Even if directions would normally give priority to the other vehicle,
+        // arrival order wins in deadlock situation
+        assert!(resolver.has_priority(
+            TurnType::Straight,
+            DOWN,
+            FIRST,
+            1.0, // north, arrived first
+            TurnType::Straight,
+            LEFT,
+            SECOND,
+            1.0, // east, arrived second
+        ));
+
+        // SECOND checking against FIRST - SECOND always loses in deadlock
         assert!(!resolver.has_priority(
-            TurnType::Straight, LEFT, entity_b(), 1.0,
-            TurnType::Straight, DOWN, entity_a(), 1.0,
+            TurnType::Straight,
+            LEFT,
+            SECOND,
+            1.0,
+            TurnType::Straight,
+            DOWN,
+            FIRST,
+            1.0,
+        ));
+    }
+
+    #[test]
+    fn test_queue_priority_over_non_queue() {
+        let resolver = YieldResolver::RightOfWay;
+        const NOT_IN_QUEUE: u32 = u32::MAX;
+
+        // Vehicle in queue (FIRST) has priority over vehicle not in queue
+        // even if the non-queue vehicle is to our right (normally we'd yield)
+        assert!(resolver.has_priority(
+            TurnType::Straight,
+            LEFT,
+            FIRST,
+            1.0, // in queue, waiting
+            TurnType::Straight,
+            DOWN,
+            NOT_IN_QUEUE,
+            0.0, // not in queue yet
+        ));
+
+        // Vehicle not in queue yields to vehicle in queue
+        // even if the queue vehicle is to our left (normally we'd have priority)
+        assert!(!resolver.has_priority(
+            TurnType::Straight,
+            DOWN,
+            NOT_IN_QUEUE,
+            0.0, // not in queue yet
+            TurnType::Straight,
+            LEFT,
+            FIRST,
+            1.0, // in queue, waiting
         ));
     }
 
@@ -203,29 +319,53 @@ mod tests {
         // North vs East: If I'm at north facing south, east is to my LEFT
         // So north has priority over east
         assert!(resolver.has_priority(
-            TurnType::Straight, from_north, entity_a(), 0.0,
-            TurnType::Straight, from_east, entity_b(), 0.0,
+            TurnType::Straight,
+            from_north,
+            FIRST,
+            0.0,
+            TurnType::Straight,
+            from_east,
+            SECOND,
+            0.0,
         ));
 
         // East vs North: If I'm at east facing west, north is to my RIGHT
         // So east yields to north
         assert!(!resolver.has_priority(
-            TurnType::Straight, from_east, entity_a(), 0.0,
-            TurnType::Straight, from_north, entity_b(), 0.0,
+            TurnType::Straight,
+            from_east,
+            FIRST,
+            0.0,
+            TurnType::Straight,
+            from_north,
+            SECOND,
+            0.0,
         ));
 
         // East vs South: If I'm at east facing west, south is to my LEFT
         // So east has priority over south
         assert!(resolver.has_priority(
-            TurnType::Straight, from_east, entity_a(), 0.0,
-            TurnType::Straight, from_south, entity_b(), 0.0,
+            TurnType::Straight,
+            from_east,
+            FIRST,
+            0.0,
+            TurnType::Straight,
+            from_south,
+            SECOND,
+            0.0,
         ));
 
         // South vs East: If I'm at south facing north, east is to my RIGHT
         // So south yields to east
         assert!(!resolver.has_priority(
-            TurnType::Straight, from_south, entity_a(), 0.0,
-            TurnType::Straight, from_east, entity_b(), 0.0,
+            TurnType::Straight,
+            from_south,
+            FIRST,
+            0.0,
+            TurnType::Straight,
+            from_east,
+            SECOND,
+            0.0,
         ));
     }
 }

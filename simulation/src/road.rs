@@ -135,7 +135,7 @@ impl Road {
     }
 
     pub fn finalize(&mut self) {
-        const INTERSECTION_RADIUS: f32 = 7.0;
+        const INTERSECTION_RADIUS: f32 = 8.0;
         const LANE_OFFSET: f32 = 1.75;
 
         struct EntryData {
@@ -350,6 +350,7 @@ impl Road {
                     .get(&data.node_id)
                     .yield_resolver
                     .unwrap_or_default(),
+                arrival_counter: 0,
             });
 
             // Clear the original intersection node's connections (it's no longer used for routing)
@@ -654,6 +655,8 @@ pub struct Intersection {
     pub conflicts: HashMap<Id<Segment>, Vec<Id<Segment>>>,
     pub yield_resolver: YieldResolver,
     pub entry_directions: HashMap<Id<Segment>, Vec3>,
+    /// Counter for FIFO arrival order at this intersection
+    pub arrival_counter: u32,
 }
 
 fn do_segments_conflict(

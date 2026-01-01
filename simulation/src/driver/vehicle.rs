@@ -87,6 +87,7 @@ pub fn move_and_despawn_vehicles(
                         vehicle.progress = new_progress;
                         vehicle.gap.waiting_time = None;
                         vehicle.gap.cleared_to_go = false;
+                        vehicle.gap.arrival_order = None;
                     }
                     None => {
                         crate::log!(

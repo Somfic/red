@@ -2898,6 +2898,7 @@ dependencies = [
  "console_error_panic_hook",
  "simulation",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
