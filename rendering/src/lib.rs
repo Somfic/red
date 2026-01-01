@@ -76,15 +76,17 @@ fn setup(
     // Isometric camera setup
     // Classic isometric: 45° rotation around vertical, ~30° elevation angle
     let distance = 120.0;
+    let look_at = Vec3::new(80.0, 0.0, 0.0); // Center between roundabout and intersection
 
     commands.spawn((
         Camera3d::default(),
         Projection::from(OrthographicProjection {
-            scale: 0.09,
+            scale: 0.18, // Zoomed out to see both intersections
             ..OrthographicProjection::default_3d()
         }),
         // Position camera at isometric angle: (d, -d, d*0.7) looking at center
-        Transform::from_xyz(distance, -distance, distance * 0.7).looking_at(Vec3::ZERO, Vec3::Z),
+        Transform::from_xyz(look_at.x + distance, look_at.y - distance, distance * 0.7)
+            .looking_at(look_at, Vec3::Z),
     ));
 
     // Simulate directional light with distant point light
@@ -138,19 +140,35 @@ pub fn test_intersection(mut commands: Commands) {
     let spacing = 80.0;
 
     // Roundabout in the center
-    let roundabout = road.add_intersection_node(Vec3::new(0.0, 0.0, 0.0), YieldResolver::Roundabout);
+    let roundabout =
+        road.add_intersection_node(Vec3::new(0.0, 0.0, 0.0), YieldResolver::Roundabout);
+
+    // Regular intersection to the east
+    let intersection =
+        road.add_intersection_node(Vec3::new(spacing * 2.0, 0.0, 0.0), YieldResolver::RightOfWay);
 
     // Edge nodes around the roundabout
     let edge_n = road.add_edge_node(Vec3::new(0.0, spacing, 0.0));
     let edge_s = road.add_edge_node(Vec3::new(0.0, -spacing, 0.0));
-    let edge_e = road.add_edge_node(Vec3::new(spacing, 0.0, 0.0));
     let edge_w = road.add_edge_node(Vec3::new(-spacing, 0.0, 0.0));
+
+    // Edge nodes around the regular intersection
+    let int_n = road.add_edge_node(Vec3::new(spacing * 2.0, spacing, 0.0));
+    let int_s = road.add_edge_node(Vec3::new(spacing * 2.0, -spacing, 0.0));
+    let int_e = road.add_edge_node(Vec3::new(spacing * 3.0, 0.0, 0.0));
 
     // Connect roundabout to edge nodes
     road.add_bidirectional(edge_n, roundabout, 13.9);
     road.add_bidirectional(edge_s, roundabout, 13.9);
-    road.add_bidirectional(edge_e, roundabout, 13.9);
     road.add_bidirectional(edge_w, roundabout, 13.9);
+
+    // Connect roundabout to intersection
+    road.add_bidirectional(roundabout, intersection, 13.9);
+
+    // Connect intersection to its edge nodes
+    road.add_bidirectional(int_n, intersection, 13.9);
+    road.add_bidirectional(int_s, intersection, 13.9);
+    road.add_bidirectional(int_e, intersection, 13.9);
 
     // Generate intersection edge nodes and turn segments
     road.finalize();
@@ -935,13 +953,3 @@ fn draw_segment_gizmo(
         gizmos.line(c0 + z_offset, c1 + z_offset, color);
     }
 }
-
-/*
-       
-      .
-     /
- == |
-     \.   .
-       \_/
-        |
-*/
