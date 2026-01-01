@@ -137,6 +137,8 @@ impl Road {
     pub fn finalize(&mut self) {
         const INTERSECTION_RADIUS: f32 = 8.0;
         const ROUNDABOUT_RADIUS: f32 = 12.0;
+        const INNER_RADIUS: f32 = 7.0; // Inner circle for through/left traffic
+        const RAMP_LENGTH: f32 = 15.0; // Straight section before roundabout curve
         const LANE_OFFSET: f32 = 1.75;
 
         struct EntryData {
@@ -174,6 +176,12 @@ impl Road {
                 } else {
                     INTERSECTION_RADIUS
                 };
+                // For roundabouts, edge nodes are further out to allow for straight ramps
+                let edge_distance = if is_roundabout {
+                    radius + RAMP_LENGTH
+                } else {
+                    radius
+                };
 
                 let entries = intersection_node
                     .incoming
@@ -184,7 +192,7 @@ impl Road {
                         let direction = (intersection_node.position - from.position).normalize();
                         let perpendicular = direction.cross(Vec3::Z);
                         // Entry is on the right side of the approach road
-                        let position = intersection_node.position - direction * radius
+                        let position = intersection_node.position - direction * edge_distance
                             + perpendicular * LANE_OFFSET;
                         // Angle of approach direction (where vehicle is coming FROM)
                         // Normalize -π to π to avoid -0.0 edge case causing inconsistent sorting
@@ -211,7 +219,7 @@ impl Road {
                         let perpendicular = direction.cross(Vec3::Z);
                         // Exit is on the right side of the exit road (perpendicular offset)
                         // For roundabouts: this places it on the opposite side of the arm from entry
-                        let position = intersection_node.position + direction * radius
+                        let position = intersection_node.position + direction * edge_distance
                             + perpendicular * LANE_OFFSET;
                         // Angle of exit direction (where vehicle is going TO)
                         // Normalize -π to π to avoid -0.0 edge case causing inconsistent sorting
@@ -281,64 +289,239 @@ impl Road {
             let mut entry_directions: HashMap<Id<Segment>, Vec3> = HashMap::new();
 
             if data.yield_resolver == YieldResolver::Roundabout {
-                // ROUNDABOUT: Create circle nodes, circle segments, entry/exit segments
+                // ROUNDABOUT: Arc triangles + inner circle design
+                // Each arm has: on-ramp → A node → bypass to B node → off-ramp
+                // Plus: A node → inner circle → B nodes for through/left turns
                 let num_arms = data.entries.len();
 
                 // Sort entries and exits by angle for proper ordering around the circle
-                let mut sorted_entries: Vec<_> = data
-                    .entries
-                    .iter()
-                    .enumerate()
-                    .collect();
-                sorted_entries.sort_by(|a, b| {
-                    a.1.angle.partial_cmp(&b.1.angle).unwrap()
-                });
+                let mut sorted_entries: Vec<_> = data.entries.iter().enumerate().collect();
+                sorted_entries.sort_by(|a, b| a.1.angle.partial_cmp(&b.1.angle).unwrap());
 
-                let mut sorted_exits: Vec<_> = data
-                    .exits
-                    .iter()
-                    .enumerate()
-                    .collect();
-                sorted_exits.sort_by(|a, b| {
-                    a.1.angle.partial_cmp(&b.1.angle).unwrap()
-                });
+                let mut sorted_exits: Vec<_> = data.exits.iter().enumerate().collect();
+                sorted_exits.sort_by(|a, b| a.1.angle.partial_cmp(&b.1.angle).unwrap());
 
-                // Create circle nodes: one between each pair of adjacent arms
-                // Circle nodes are positioned at the midpoint angle between adjacent entries
-                // All nodes (entry, exit, circle) are on the same circle at ROUNDABOUT_RADIUS
-                let mut circle_node_ids: Vec<Id<Node>> = Vec::new();
+                // Helper to compute arc center and clockwise flag given start point, start direction, and end point
+                // Returns (center, radius, clockwise) for an arc that starts at p1 heading in dir1 and ends at p2
+                let compute_arc = |p1: Vec3, dir1: Vec3, p2: Vec3| -> (Vec3, f32, bool) {
+                    // Perpendicular to start direction (potential center lies on this line from p1)
+                    let perp1 = Vec3::new(-dir1.y, dir1.x, 0.0);
+                    // Midpoint between p1 and p2
+                    let mid = (p1 + p2) / 2.0;
+                    // Perpendicular bisector direction
+                    let diff = p2 - p1;
+                    let perp_bisector = Vec3::new(-diff.y, diff.x, 0.0).normalize();
 
-                for i in 0..num_arms {
-                    let angle1 = sorted_entries[i].1.angle;
-                    let angle2 = sorted_entries[(i + 1) % num_arms].1.angle;
+                    // Solve: p1 + t * perp1 = mid + s * perp_bisector
+                    let det = perp1.x * (-perp_bisector.y) - perp1.y * (-perp_bisector.x);
+                    let center = if det.abs() < 0.0001 {
+                        // Nearly parallel, use midpoint as fallback
+                        mid
+                    } else {
+                        let t = ((mid.x - p1.x) * (-perp_bisector.y)
+                            - (mid.y - p1.y) * (-perp_bisector.x))
+                            / det;
+                        p1 + perp1 * t
+                    };
 
-                    // Calculate midpoint angle (handling wrap-around)
-                    let mut mid_angle = (angle1 + angle2) / 2.0;
-                    if (angle2 - angle1).abs() > std::f32::consts::PI {
-                        mid_angle += std::f32::consts::PI;
-                    }
+                    let radius = (p1 - center).length();
 
-                    // Position on circle - same radius as entry/exit nodes
-                    let pos = data.position
-                        + Vec3::new(mid_angle.cos(), mid_angle.sin(), 0.0) * ROUNDABOUT_RADIUS;
-                    let node_id = self.add_node(pos);
-                    circle_node_ids.push(node_id);
+                    // Determine clockwise flag based on which side of the path the center is
+                    // Right of direction = clockwise, Left = counter-clockwise
+                    let right_dir = Vec3::new(dir1.y, -dir1.x, 0.0);
+                    let clockwise = (center - p1).dot(right_dir) > 0.0;
+
+                    (center, radius, clockwise)
+                };
+
+                // Create nodes for each arm:
+                // - A node: on-ramp landing (45° right from entry direction, on outer circle)
+                // - B node: off-ramp departure (45° left from exit direction, on outer circle)
+                // - Inner node: same angle as A, but on inner circle
+                let mut a_nodes: Vec<Id<Node>> = Vec::new();
+                let mut b_nodes: Vec<Id<Node>> = Vec::new();
+                let mut inner_nodes: Vec<Id<Node>> = Vec::new();
+
+                for (_orig_idx, entry) in sorted_entries.iter() {
+                    // A is 45° counter-clockwise from approach (for CCW flow, curve right to merge)
+                    let a_angle = entry.angle + std::f32::consts::FRAC_PI_4;
+                    let a_pos = data.position
+                        + Vec3::new(a_angle.cos(), a_angle.sin(), 0.0) * ROUNDABOUT_RADIUS;
+                    let a_node = self.add_node(a_pos);
+                    a_nodes.push(a_node);
+
+                    // Inner node at same angle as A, smaller radius
+                    let inner_pos = data.position
+                        + Vec3::new(a_angle.cos(), a_angle.sin(), 0.0) * INNER_RADIUS;
+                    let inner_node = self.add_node(inner_pos);
+                    inner_nodes.push(inner_node);
                 }
 
-                // Create circle segments (connecting circle nodes, clockwise)
-                // Clockwise means going from higher angle to lower angle (or wrapping 0 -> 2π)
+                for (_orig_idx, exit) in sorted_exits.iter() {
+                    // B is 45° clockwise from exit direction (for CCW flow, curve right to exit)
+                    let b_angle = exit.angle - std::f32::consts::FRAC_PI_4;
+                    let b_pos = data.position
+                        + Vec3::new(b_angle.cos(), b_angle.sin(), 0.0) * ROUNDABOUT_RADIUS;
+                    let b_node = self.add_node(b_pos);
+                    b_nodes.push(b_node);
+                }
+
+                // Create on-ramp arcs: edge → A (curves 45° right)
+                for (sorted_idx, (orig_idx, entry)) in sorted_entries.iter().enumerate() {
+                    let entry_edge_id = entry_node_ids[*orig_idx];
+                    let a_node = a_nodes[sorted_idx];
+
+                    let edge_pos = self.nodes.get(&entry_edge_id).position;
+                    let a_pos = self.nodes.get(&a_node).position;
+
+                    let (arc_center, arc_radius, clockwise) =
+                        compute_arc(edge_pos, entry.direction, a_pos);
+
+                    let geometry = SegmentGeometry::Curved {
+                        center: arc_center,
+                        radius: arc_radius,
+                        clockwise,
+                    };
+                    let length = geometry.length(edge_pos, a_pos);
+
+                    let segment_id = self.segments.alloc(Segment {
+                        from: entry_edge_id,
+                        to: a_node,
+                        speed_limit: speed::SLOW,
+                        geometry,
+                        turn_type: TurnType::RoundaboutEntry,
+                        length,
+                    });
+
+                    entry_directions.insert(segment_id, entry.direction);
+
+                    self.nodes.get_mut(&entry_edge_id).outgoing.push(segment_id);
+                    self.nodes.get_mut(&a_node).incoming.push(segment_id);
+
+                    intersection_incoming.push(segment_id);
+                }
+
+                // Create bypass arcs: A → next B (short arc for right turns, counter-clockwise flow)
+                // In right-hand traffic, roundabout flows counter-clockwise (increasing angle)
+                // So A[i] connects to B[(i+1) % num_arms] for right turn bypass
+                for sorted_idx in 0..num_arms {
+                    let a_node = a_nodes[sorted_idx];
+                    let next_b_node = b_nodes[(sorted_idx + 1) % num_arms];
+
+                    let a_pos = self.nodes.get(&a_node).position;
+                    let b_pos = self.nodes.get(&next_b_node).position;
+
+                    let geometry = SegmentGeometry::Curved {
+                        center: data.position,
+                        radius: ROUNDABOUT_RADIUS,
+                        clockwise: false, // counter-clockwise flow
+                    };
+                    let length = geometry.length(a_pos, b_pos);
+
+                    let segment_id = self.segments.alloc(Segment {
+                        from: a_node,
+                        to: next_b_node,
+                        speed_limit: speed::SLOW,
+                        geometry,
+                        turn_type: TurnType::RoundaboutCircle,
+                        length,
+                    });
+
+                    // Tangent for counter-clockwise: 90° counter-clockwise from outward
+                    let from_dir = (a_pos - data.position).normalize();
+                    let tangent = Vec3::new(-from_dir.y, from_dir.x, 0.0);
+                    entry_directions.insert(segment_id, tangent);
+
+                    self.nodes.get_mut(&a_node).outgoing.push(segment_id);
+                    self.nodes.get_mut(&next_b_node).incoming.push(segment_id);
+
+                    intersection_incoming.push(segment_id);
+                    intersection_outgoing.push(segment_id);
+                }
+
+                // Create off-ramp arcs: B → edge (curves out)
+                for (sorted_idx, (orig_idx, _exit)) in sorted_exits.iter().enumerate() {
+                    let exit_edge_id = exit_node_ids[*orig_idx];
+                    let b_node = b_nodes[sorted_idx];
+
+                    let b_pos = self.nodes.get(&b_node).position;
+                    let edge_pos = self.nodes.get(&exit_edge_id).position;
+
+                    // Tangent at B pointing counter-clockwise around circle
+                    let from_dir = (b_pos - data.position).normalize();
+                    let tangent_at_b = Vec3::new(-from_dir.y, from_dir.x, 0.0);
+
+                    let (arc_center, arc_radius, clockwise) =
+                        compute_arc(b_pos, tangent_at_b, edge_pos);
+
+                    let geometry = SegmentGeometry::Curved {
+                        center: arc_center,
+                        radius: arc_radius,
+                        clockwise,
+                    };
+                    let length = geometry.length(b_pos, edge_pos);
+
+                    let segment_id = self.segments.alloc(Segment {
+                        from: b_node,
+                        to: exit_edge_id,
+                        speed_limit: speed::SLOW,
+                        geometry,
+                        turn_type: TurnType::RoundaboutExit,
+                        length,
+                    });
+
+                    entry_directions.insert(segment_id, tangent_at_b);
+
+                    self.nodes.get_mut(&b_node).outgoing.push(segment_id);
+                    self.nodes.get_mut(&exit_edge_id).incoming.push(segment_id);
+
+                    intersection_outgoing.push(segment_id);
+                }
+
+                // Create A → inner connections (curve inward from outer A to inner node)
+                for sorted_idx in 0..num_arms {
+                    let a_node = a_nodes[sorted_idx];
+                    let inner_node = inner_nodes[sorted_idx];
+
+                    let a_pos = self.nodes.get(&a_node).position;
+                    let inner_pos = self.nodes.get(&inner_node).position;
+
+                    // Simple straight segment from A to inner (they're radially aligned)
+                    let geometry = SegmentGeometry::Straight;
+                    let length = a_pos.distance(inner_pos);
+
+                    let segment_id = self.segments.alloc(Segment {
+                        from: a_node,
+                        to: inner_node,
+                        speed_limit: speed::SLOW,
+                        geometry,
+                        turn_type: TurnType::RoundaboutEntry,
+                        length,
+                    });
+
+                    // CCW tangent direction
+                    let from_dir = (a_pos - data.position).normalize();
+                    let tangent = Vec3::new(-from_dir.y, from_dir.x, 0.0);
+                    entry_directions.insert(segment_id, tangent);
+
+                    self.nodes.get_mut(&a_node).outgoing.push(segment_id);
+                    self.nodes.get_mut(&inner_node).incoming.push(segment_id);
+
+                    intersection_incoming.push(segment_id);
+                }
+
+                // Create inner circle segments (counter-clockwise for right-hand traffic)
                 for i in 0..num_arms {
-                    // For clockwise: go from node i to node i-1 (with wraparound)
-                    let from_node = circle_node_ids[i];
-                    let to_node = circle_node_ids[(i + num_arms - 1) % num_arms];
+                    let from_node = inner_nodes[i];
+                    let to_node = inner_nodes[(i + 1) % num_arms]; // counter-clockwise = increasing index
 
                     let from_pos = self.nodes.get(&from_node).position;
                     let to_pos = self.nodes.get(&to_node).position;
 
                     let geometry = SegmentGeometry::Curved {
                         center: data.position,
-                        radius: ROUNDABOUT_RADIUS,
-                        clockwise: true, // Traffic flows clockwise
+                        radius: INNER_RADIUS,
+                        clockwise: false, // counter-clockwise
                     };
                     let length = geometry.length(from_pos, to_pos);
 
@@ -351,9 +534,9 @@ impl Road {
                         length,
                     });
 
-                    // Direction for circle segment is tangent to circle (clockwise = perpendicular pointing "right")
+                    // Tangent for counter-clockwise: 90° counter-clockwise from outward
                     let from_dir = (from_pos - data.position).normalize();
-                    let tangent = Vec3::new(from_dir.y, -from_dir.x, 0.0); // 90° clockwise from outward
+                    let tangent = Vec3::new(-from_dir.y, from_dir.x, 0.0);
                     entry_directions.insert(segment_id, tangent);
 
                     self.nodes.get_mut(&from_node).outgoing.push(segment_id);
@@ -363,78 +546,41 @@ impl Road {
                     intersection_outgoing.push(segment_id);
                 }
 
-                // Create entry segments (from entry edge node to circle node)
-                // Entry merges into the circle - needs a tight right-hand curve
-                for (sorted_idx, (orig_idx, entry)) in sorted_entries.iter().enumerate() {
-                    let entry_node_id = entry_node_ids[*orig_idx];
-                    // For clockwise traffic: entry merges at the circle node BEFORE this entry in angle
-                    // (i.e., clockwise from the entry arm, which is index-1)
-                    let target_circle_node = circle_node_ids[(sorted_idx + num_arms - 1) % num_arms];
+                // Create inner → B connections (from each inner node to NEXT arm's B node in CCW order)
+                for i in 0..num_arms {
+                    let inner_node = inner_nodes[i];
+                    let next_b = b_nodes[(i + 1) % num_arms]; // next B in counter-clockwise order
 
-                    let from_pos = self.nodes.get(&entry_node_id).position;
-                    let to_pos = self.nodes.get(&target_circle_node).position;
+                    let inner_pos = self.nodes.get(&inner_node).position;
+                    let b_pos = self.nodes.get(&next_b).position;
 
-                    // All roundabout segments are on the same circle - smooth curves
+                    // Curved arc from inner circle out to B node (CCW tangent)
+                    let from_dir = (inner_pos - data.position).normalize();
+                    let tangent = Vec3::new(-from_dir.y, from_dir.x, 0.0);
+
+                    let (arc_center, arc_radius, clockwise) =
+                        compute_arc(inner_pos, tangent, b_pos);
+
                     let geometry = SegmentGeometry::Curved {
-                        center: data.position,
-                        radius: ROUNDABOUT_RADIUS,
-                        clockwise: true,
+                        center: arc_center,
+                        radius: arc_radius,
+                        clockwise,
                     };
-                    let length = geometry.length(from_pos, to_pos);
+                    let length = geometry.length(inner_pos, b_pos);
 
                     let segment_id = self.segments.alloc(Segment {
-                        from: entry_node_id,
-                        to: target_circle_node,
-                        speed_limit: speed::SLOW,
-                        geometry,
-                        turn_type: TurnType::RoundaboutEntry,
-                        length,
-                    });
-
-                    entry_directions.insert(segment_id, entry.direction);
-
-                    self.nodes.get_mut(&entry_node_id).outgoing.push(segment_id);
-                    self.nodes.get_mut(&target_circle_node).incoming.push(segment_id);
-
-                    intersection_incoming.push(segment_id);
-                }
-
-                // Create exit segments (from circle node to exit edge node)
-                // Exit diverges from the circle - needs a tight right-hand curve
-                for (sorted_idx, (orig_idx, _exit)) in sorted_exits.iter().enumerate() {
-                    let exit_node_id = exit_node_ids[*orig_idx];
-                    // For clockwise traffic: exit diverges from the circle node at this exit's index
-                    // For right turn: this matches where entry from previous arm connects
-                    let source_circle_node = circle_node_ids[sorted_idx];
-
-                    let from_pos = self.nodes.get(&source_circle_node).position;
-                    let to_pos = self.nodes.get(&exit_node_id).position;
-
-                    // All roundabout segments are on the same circle - smooth curves
-                    let geometry = SegmentGeometry::Curved {
-                        center: data.position,
-                        radius: ROUNDABOUT_RADIUS,
-                        clockwise: true,
-                    };
-                    let length = geometry.length(from_pos, to_pos);
-
-                    // Circle tangent at source (clockwise direction) for entry_directions
-                    let from_dir = (from_pos - data.position).normalize();
-                    let circle_tangent = Vec3::new(from_dir.y, -from_dir.x, 0.0);
-
-                    let segment_id = self.segments.alloc(Segment {
-                        from: source_circle_node,
-                        to: exit_node_id,
+                        from: inner_node,
+                        to: next_b,
                         speed_limit: speed::SLOW,
                         geometry,
                         turn_type: TurnType::RoundaboutExit,
                         length,
                     });
 
-                    entry_directions.insert(segment_id, circle_tangent);
+                    entry_directions.insert(segment_id, tangent);
 
-                    self.nodes.get_mut(&source_circle_node).outgoing.push(segment_id);
-                    self.nodes.get_mut(&exit_node_id).incoming.push(segment_id);
+                    self.nodes.get_mut(&inner_node).outgoing.push(segment_id);
+                    self.nodes.get_mut(&next_b).incoming.push(segment_id);
 
                     intersection_outgoing.push(segment_id);
                 }

@@ -935,3 +935,13 @@ fn draw_segment_gizmo(
         gizmos.line(c0 + z_offset, c1 + z_offset, color);
     }
 }
+
+/*
+       
+      .
+     /
+ == |
+     \.   .
+       \_/
+        |
+*/
