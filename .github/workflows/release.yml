@@ -167,7 +167,7 @@ jobs:
       - name: deploy to github pages
         if: steps.version.outputs.should_release == 'true'
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
       - name: create git tag
         if: steps.version.outputs.should_release == 'true'
