@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy_ecs = "0.17.3"
+bevy_ecs = "0.18.0"
 bevy_app = "0.17.3"
 bevy_time = "0.17.3"
 bevy_log = "0.17.3"
